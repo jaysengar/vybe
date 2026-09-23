@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -18,6 +19,7 @@ import {
   Mic,
   ShieldCheck,
   Trash2,
+  X,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -27,6 +29,7 @@ import { Button } from '../../src/components/ui/Button';
 import { Switch } from '../../src/components/ui/Switch';
 import { API_BASE_URL } from '../../src/config';
 import { socketService } from '../../src/integrations/socket';
+import RazorpayCheckout from 'react-native-razorpay';
 
 function ToggleRow({
   icon: Icon,
@@ -80,6 +83,7 @@ export default function SettingsScreen() {
   const [camera, setCamera] = useState(true);
   const [microphone, setMicrophone] = useState(true);
   const [user, setUser] = useState<any>(null);
+  const [buyGemsOpen, setBuyGemsOpen] = useState(false);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -147,6 +151,66 @@ export default function SettingsScreen() {
       });
     } catch (err) {
       console.error('Failed to update preference:', err);
+    }
+  };
+
+  const handleBuyGems = async (amount: number, priceINR: number) => {
+    if (!user) return;
+    try {
+      // 1. Create order on backend
+      const res = await fetch(`${API_BASE_URL}/api/payments/create-order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: priceINR, userId: user._id })
+      });
+      const order = await res.json();
+      if (!order.id) throw new Error('Failed to create order');
+
+      // 2. Open Razorpay Checkout
+      const options = {
+        description: `Buy ${amount} Gems`,
+        image: 'https://i.imgur.com/3g7nmJC.png',
+        currency: 'INR',
+        key: 'rzp_test_YourKeyIdHere', // Replace with your real Razorpay key
+        amount: order.amount,
+        name: 'VYBE',
+        order_id: order.id,
+        prefill: {
+          email: `${user.username}@vybe.app`,
+          contact: '9999999999',
+          name: user.username
+        },
+        theme: { color: colors.primary }
+      };
+
+      RazorpayCheckout.open(options).then(async (data: any) => {
+        // 3. Verify Payment
+        const verifyRes = await fetch(`${API_BASE_URL}/api/payments/verify`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            razorpay_order_id: data.razorpay_order_id,
+            razorpay_payment_id: data.razorpay_payment_id,
+            razorpay_signature: data.razorpay_signature,
+            userId: user._id,
+            diamondsToAdd: amount
+          })
+        });
+        const verifyData = await verifyRes.json();
+        if (verifyData.success) {
+          Alert.alert('Success', `You purchased ${amount} Gems!`);
+          setBuyGemsOpen(false);
+          // Balance updates automatically via socket
+        } else {
+          Alert.alert('Error', 'Payment verification failed.');
+        }
+      }).catch((error: any) => {
+        Alert.alert('Error', `Payment cancelled or failed: ${error.description || error.message}`);
+      });
+
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Error', 'Could not initiate payment.');
     }
   };
 
@@ -236,14 +300,11 @@ export default function SettingsScreen() {
            </View>
            <View style={{ padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
              <View>
-               <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>Buy 50 Gems</Text>
-               <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>Mock purchase flow.</Text>
+               <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>Buy Gems</Text>
+               <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>Get more gems to match & chat.</Text>
              </View>
-             <Button variant="default" size="sm" onPress={() => {
-                socketService.socket?.emit('buy_gems', { userId: user?._id });
-                Alert.alert('Purchase Successful', 'Added 50 Gems to your wallet!');
-             }}>
-               Buy
+             <Button variant="default" size="sm" onPress={() => setBuyGemsOpen(true)}>
+               Buy Gems
              </Button>
            </View>
         </View>
@@ -319,6 +380,56 @@ export default function SettingsScreen() {
 
         <Text style={styles.footer}>VYBE 1.0 · Safety comes first</Text>
       </ScrollView>
+
+      {/* Buy Gems Modal */}
+      <Modal visible={buyGemsOpen} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Buy Gems</Text>
+              <TouchableOpacity onPress={() => setBuyGemsOpen(false)} style={styles.closeBtn}>
+                <X size={24} color={colors.foreground} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ padding: 24, gap: 16 }}>
+              {[
+                { gems: 100, price: 100, tag: 'Popular' },
+                { gems: 150, price: 150, tag: 'Best Value' },
+                { gems: 200, price: 200, tag: 'Premium' },
+              ].map((pkg) => (
+                <TouchableOpacity 
+                  key={pkg.gems} 
+                  style={{ 
+                    flexDirection: 'row', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between', 
+                    padding: 16, 
+                    borderWidth: 1, 
+                    borderColor: colors.border, 
+                    borderRadius: radii.xl 
+                  }}
+                  activeOpacity={0.7}
+                  onPress={() => handleBuyGems(pkg.gems, pkg.price)}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(236, 72, 153, 0.1)', justifyContent: 'center', alignItems: 'center' }}>
+                      <Gem size={20} color={colors.primary} fill={colors.primary} />
+                    </View>
+                    <View>
+                      <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '700' }}>{pkg.gems} Gems</Text>
+                      {pkg.tag && <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '600', marginTop: 2 }}>{pkg.tag}</Text>}
+                    </View>
+                  </View>
+                  <View style={{ backgroundColor: colors.primary, paddingHorizontal: 16, paddingVertical: 8, borderRadius: radii.full }}>
+                    <Text style={{ color: colors.primaryForeground, fontWeight: '600' }}>₹{pkg.price}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -495,5 +606,41 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.mutedForeground,
     marginTop: 8,
+  },
+
+  // ---- Modal ----
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radii.2xl,
+    borderTopRightRadius: radii.2xl,
+    minHeight: 300,
+    paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.foreground,
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.secondary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

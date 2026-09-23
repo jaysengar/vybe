@@ -132,16 +132,28 @@ io.on('connection', (socket) => {
     }
   };
 
-  socket.on('join_queue', (data) => {
+  socket.on('join_queue', async (data) => {
     console.log(`User ${socket.id} joined queue with filters:`, data);
-    queue = queue.filter(u => u.socketId !== socket.id); // Prevent duplicates
-    queue.push({
-      socketId: socket.id,
-      userId: data.userId,
-      gender: data.gender,
-      filterGender: data.filterGender
-    });
-    tryMatch();
+
+    try {
+      // 1. Verification check for Females
+      const user = await User.findById(data.userId);
+      if (user && user.gender === 'Female' && user.verificationStatus !== 'verified') {
+        io.to(socket.id).emit('match_error', { reason: 'unverified_female' });
+        return;
+      }
+
+      queue = queue.filter(u => u.socketId !== socket.id); // Prevent duplicates
+      queue.push({
+        socketId: socket.id,
+        userId: data.userId,
+        gender: data.gender,
+        filterGender: data.filterGender
+      });
+      tryMatch();
+    } catch (err) {
+      console.error('Error joining queue:', err);
+    }
   });
   
   socket.on('leave_queue', () => {

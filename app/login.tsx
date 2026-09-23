@@ -40,7 +40,12 @@ export default function LoginScreen() {
 
       if (response.ok) {
         await AsyncStorage.setItem('user', JSON.stringify(data.user));
-        router.replace('/(tabs)');
+        
+        if (data.user.verificationStatus === 'unverified') {
+          router.replace('/verify');
+        } else {
+          router.replace('/(tabs)');
+        }
       } else {
         Alert.alert('Error', data.error || 'Failed to login');
       }

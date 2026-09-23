@@ -24,7 +24,9 @@ router.post('/login', async (req, res) => {
       if (!gender || !age) {
         return res.status(400).json({ error: 'Gender and age are required for new users' });
       }
-      user = new User({ username, gender, age });
+      // Males are auto-verified (no incentive to fake), females need to pass liveness check
+      const verificationStatus = gender === 'Male' ? 'verified' : 'unverified';
+      user = new User({ username, gender, age, verificationStatus });
       await user.save();
     }
 
@@ -69,6 +71,35 @@ router.put('/profile/:id', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ message: 'Profile updated', user });
   } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Verify liveness via Photo upload (Mocking AWS Rekognition)
+router.post('/verify-liveness', async (req, res) => {
+  try {
+    const { userId, photoBase64 } = req.body;
+    
+    if (!userId || !photoBase64) {
+      return res.status(400).json({ error: 'User ID and Photo are required' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // [INTEGRATION POINT]: Here you would send `photoBase64` to AWS Rekognition or GCP Vision API
+    // e.g. const aiResponse = await rekognition.detectFaces({ Image: { Bytes: buffer }, Attributes: ['ALL'] }).promise();
+    // if (aiResponse.FaceDetails[0].Gender.Value === 'Female' && isLive(aiResponse)) { ... }
+    
+    // For MVP, we will MOCK the AI processing delay (2 seconds) and always approve
+    setTimeout(async () => {
+      user.verificationStatus = 'verified';
+      await user.save();
+      res.json({ success: true, message: 'Verified successfully', user });
+    }, 2000);
+    
+  } catch (error) {
+    console.error('Liveness Verification Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

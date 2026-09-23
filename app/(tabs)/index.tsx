@@ -549,10 +549,11 @@ export default function HomeScreen() {
   });
 
   return (
-    <SafeAreaView style={[styles.flex1, styles.bgMain]}>
-      <TopBar />
+    <ImageBackground source={matchBg} style={styles.flex1} resizeMode="cover">
+      <SafeAreaView style={[styles.flex1, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
+        <TopBar />
 
-      {/* Filters */}
+        {/* Filters */}
       <View style={styles.filterPanel}>
         <TouchableOpacity
           style={styles.filterBtn}
@@ -607,6 +608,7 @@ export default function HomeScreen() {
         </Text>
       </View>
     </SafeAreaView>
+  </ImageBackground>
   );
 }
 

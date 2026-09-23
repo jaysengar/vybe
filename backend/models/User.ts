@@ -13,6 +13,7 @@ export interface IUser extends Document {
     micAccess: boolean;
     language: string;
   };
+  verificationStatus: 'unverified' | 'pending' | 'verified' | 'failed';
   isVip: boolean;
   blockedUsers: mongoose.Types.ObjectId[];
   createdAt: Date;
@@ -31,6 +32,7 @@ const UserSchema: Schema = new Schema({
     micAccess: { type: Boolean, default: true },
     language: { type: String, default: 'English' }
   },
+  verificationStatus: { type: String, enum: ['unverified', 'pending', 'verified', 'failed'], default: 'unverified' },
   isVip: { type: Boolean, default: false },
   blockedUsers: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   status: { type: String, enum: ['active', 'banned'], default: 'active' }
