@@ -4,36 +4,70 @@ import { RekognitionClient, DetectFacesCommand } from '@aws-sdk/client-rekogniti
 
 const router = express.Router();
 
-// Simple Login/Signup endpoint for MVP
-router.post('/login', async (req, res) => {
+// Google Login Endpoint
+router.post('/google-login', async (req, res) => {
   try {
-    const { username, gender, age } = req.body;
+    const { googleId, email, name, deviceId } = req.body;
 
-    if (!username) {
-      return res.status(400).json({ error: 'Username is required' });
+    if (!googleId || !email) {
+      return res.status(400).json({ error: 'Google ID and Email are required' });
     }
 
-    // Check if user exists
-    let user = await User.findOne({ username });
+    let user = await User.findOne({ username: email }); // Using email as unique username for now
 
     if (user && (user as any).status === 'banned') {
-       return res.status(403).json({ error: 'Your account has been banned due to policy violations.' });
+      return res.status(403).json({ error: 'Your account has been banned due to policy violations.' });
     }
 
-    if (!user) {
-      // Create new user if they don't exist and we have gender/age
-      if (!gender || !age) {
-        return res.status(400).json({ error: 'Gender and age are required for new users' });
+    if (user) {
+      // Existing user
+      return res.json({ message: 'Login successful', user, isNewUser: false });
+    } else {
+      // New User
+      // Check if this deviceId has already claimed gems
+      let startingDiamonds = 10;
+      if (deviceId) {
+        const existingDevice = await User.findOne({ deviceId });
+        if (existingDevice) {
+          startingDiamonds = 0; // Device farming detected
+        }
       }
-      // Males are auto-verified (no incentive to fake), females need to pass liveness check
-      const verificationStatus = gender === 'Male' ? 'verified' : 'unverified';
-      user = new User({ username, gender, age, verificationStatus });
+
+      // Create partial user without gender/age (to be filled in onboarding)
+      user = new User({ 
+        username: email, 
+        deviceId,
+        diamonds: startingDiamonds,
+        // we'll update gender/age later
+      });
       await user.save();
+      
+      return res.json({ message: 'User created. Onboarding required.', user, isNewUser: true });
+    }
+  } catch (error) {
+    console.error('Google Auth Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Complete Onboarding Endpoint (Called after Google Login for new users)
+router.post('/complete-onboarding', async (req, res) => {
+  try {
+    const { userId, age, gender } = req.body;
+    if (!userId || !age || !gender) {
+      return res.status(400).json({ error: 'Age and gender are required' });
     }
 
-    res.json({ message: 'Login successful', user });
+    const verificationStatus = gender === 'Male' ? 'verified' : 'unverified';
+    
+    const user = await User.findByIdAndUpdate(
+      userId, 
+      { age, gender, verificationStatus }, 
+      { new: true }
+    );
+    
+    res.json({ message: 'Onboarding complete', user });
   } catch (error) {
-    console.error('Auth Error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

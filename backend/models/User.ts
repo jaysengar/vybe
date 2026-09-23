@@ -15,6 +15,7 @@ export interface IUser extends Document {
   };
   verificationStatus: 'unverified' | 'pending' | 'verified' | 'failed';
   isVip: boolean;
+  deviceId?: string;
   blockedUsers: mongoose.Types.ObjectId[];
   createdAt: Date;
 }
@@ -34,6 +35,7 @@ const UserSchema: Schema = new Schema({
   },
   verificationStatus: { type: String, enum: ['unverified', 'pending', 'verified', 'failed'], default: 'unverified' },
   isVip: { type: Boolean, default: false },
+  deviceId: { type: String }, // To track multiple accounts on same phone
   blockedUsers: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   status: { type: String, enum: ['active', 'banned'], default: 'active' }
 }, {
