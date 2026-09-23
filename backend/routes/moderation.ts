@@ -8,7 +8,7 @@ const router = express.Router();
 // Report and Block a user
 router.post('/report', async (req, res) => {
   try {
-    const { reporterId, reportedUserId, reason } = req.body;
+    const { reporterId, reportedUserId, reason, screenshotUrl } = req.body;
 
     if (!reporterId || !reportedUserId || !reason) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -31,7 +31,8 @@ router.post('/report', async (req, res) => {
     const report = new Report({
       reporterId,
       reportedUserId,
-      reason
+      reason,
+      screenshotUrl
     });
     await report.save();
 

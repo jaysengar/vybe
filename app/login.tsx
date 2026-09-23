@@ -7,10 +7,12 @@ import * as Application from 'expo-application';
 import { GoogleSignin, GoogleSigninButton } from '@react-native-google-signin/google-signin';
 import { colors } from '../src/theme/colors';
 import { API_BASE_URL } from '../src/config';
+import { CustomAlert } from '../src/components/ui/CustomAlert';
 
 export default function LoginScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [alertState, setAlertState] = useState({ visible: false, title: '', message: '' });
 
   useEffect(() => {
     GoogleSignin.configure({
@@ -56,11 +58,13 @@ export default function LoginScreen() {
 
       if (response.ok) {
         if (data.isNewUser) {
+          if (data.token) await AsyncStorage.setItem('token', data.token);
           // Pass the user _id to onboarding screen
           router.replace({ pathname: '/onboarding', params: { userId: data.user._id } });
         } else {
           // Existing user, store and go to tabs
           await AsyncStorage.setItem('user', JSON.stringify(data.user));
+          if (data.token) await AsyncStorage.setItem('token', data.token);
           if (data.user.verificationStatus === 'unverified') {
             router.replace('/verify');
           } else {
@@ -68,11 +72,11 @@ export default function LoginScreen() {
           }
         }
       } else {
-        Alert.alert('Error', data.error || 'Failed to login');
+        setAlertState({ visible: true, title: 'Error', message: data.error || 'Failed to login' });
       }
     } catch (error: any) {
       console.error(error);
-      Alert.alert('Login Failed', error.message || 'Could not sign in with Google');
+      setAlertState({ visible: true, title: 'Login Failed', message: error.message || 'Could not sign in with Google' });
     } finally {
       setLoading(false);
     }
@@ -93,6 +97,12 @@ export default function LoginScreen() {
           />
         </View>
       </View>
+      <CustomAlert
+        visible={alertState.visible}
+        title={alertState.title}
+        message={alertState.message}
+        onPrimaryPress={() => setAlertState({ ...alertState, visible: false })}
+      />
     </SafeAreaView>
   );
 }

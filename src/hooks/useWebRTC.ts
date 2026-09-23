@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  RTCPeerConnection,
-  RTCIceCandidate,
-  RTCSessionDescription,
-  mediaDevices,
-  MediaStream,
-} from 'react-native-webrtc';
+let RTCPeerConnection: any = null;
+let RTCIceCandidate: any = null;
+let RTCSessionDescription: any = null;
+let mediaDevices: any = null;
+let MediaStream: any = null;
+try {
+  const webrtc = require('react-native-webrtc');
+  RTCPeerConnection = webrtc.RTCPeerConnection;
+  RTCIceCandidate = webrtc.RTCIceCandidate;
+  RTCSessionDescription = webrtc.RTCSessionDescription;
+  mediaDevices = webrtc.mediaDevices;
+  MediaStream = webrtc.MediaStream;
+} catch (e) {
+  console.log('WebRTC native module not found');
+  mediaDevices = {
+    getUserMedia: async () => ({ getTracks: () => [] })
+  };
+}
 import { socketService } from '../integrations/socket';
 import { ICE_SERVERS } from '../integrations/webrtc';
 
@@ -26,8 +37,9 @@ export const useWebRTC = () => {
       });
       setLocalStream(stream as any);
       return stream;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error getting user media:', err);
+      throw err;
     }
   };
 

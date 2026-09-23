@@ -2,7 +2,11 @@ import express from 'express';
 import User from '../models/User';
 import { RekognitionClient, DetectFacesCommand } from '@aws-sdk/client-rekognition';
 
+import jwt from 'jsonwebtoken';
+
 const router = express.Router();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_123';
 
 // Google Login Endpoint
 router.post('/google-login', async (req, res) => {
@@ -21,7 +25,8 @@ router.post('/google-login', async (req, res) => {
 
     if (user) {
       // Existing user
-      return res.json({ message: 'Login successful', user, isNewUser: false });
+      const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
+      return res.json({ message: 'Login successful', user, token, isNewUser: false });
     } else {
       // New User
       // Check if this deviceId has already claimed gems
@@ -33,16 +38,18 @@ router.post('/google-login', async (req, res) => {
         }
       }
 
-      // Create partial user without gender/age (to be filled in onboarding)
+      // Create partial user with temporary gender/age (to be properly filled in onboarding)
       user = new User({ 
         username: email, 
         deviceId,
         diamonds: startingDiamonds,
-        // we'll update gender/age later
+        age: 18, // Mongoose requires this, will be updated in onboarding
+        gender: 'Male', // Mongoose requires this, will be updated in onboarding
       });
       await user.save();
       
-      return res.json({ message: 'User created. Onboarding required.', user, isNewUser: true });
+      const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
+      return res.json({ message: 'User created. Onboarding required.', user, token, isNewUser: true });
     }
   } catch (error) {
     console.error('Google Auth Error:', error);

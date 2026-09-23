@@ -1,47 +1,67 @@
 import express from 'express';
-import Message from '../models/Message';
 import User from '../models/User';
+import Message from '../models/Message';
 
 const router = express.Router();
 
-// Get conversation history between two users
-router.get('/history/:userId/:otherUserId', async (req, res) => {
+// Get past matches for a user
+router.get('/matches/:userId', async (req, res) => {
   try {
-    const { userId, otherUserId } = req.params;
+    const { userId } = req.params;
+    const user = await User.findById(userId).populate('pastMatches.user', 'username gender age isVip location');
     
-    const messages = await Message.find({
-      $or: [
-        { senderId: userId, receiverId: otherUserId },
-        { senderId: otherUserId, receiverId: userId }
-      ]
-    }).sort({ createdAt: 1 }); // Oldest first
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-    res.json({ messages });
+    // Return the matches (filtering out any nulls if users were deleted)
+    const matches = user.pastMatches
+      .filter(m => m.user != null)
+      .map(m => {
+        const otherUser = m.user as any;
+        let distance = 'Unknown distance';
+        if (user.location && user.location.lat && otherUser.location && otherUser.location.lat) {
+          const R = 6371; 
+          const dLat = (otherUser.location.lat - user.location.lat) * Math.PI / 180;
+          const dLon = (otherUser.location.lon - user.location.lon) * Math.PI / 180;
+          const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(user.location.lat * Math.PI / 180) * Math.cos(otherUser.location.lat * Math.PI / 180) *
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+          const km = Math.round(R * c);
+          distance = `${km} km away`;
+        }
+
+        return {
+          matchedAt: m.matchedAt,
+          user: otherUser,
+          distance
+        };
+      });
+
+    res.json({ matches });
   } catch (error) {
-    console.error('Error fetching messages:', error);
-    res.status(500).json({ error: 'Failed to fetch messages' });
+    console.error('Error fetching matches:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get list of active chats (people the user has messaged or received messages from)
-router.get('/active-chats/:userId', async (req, res) => {
+// Get chat history between two users
+router.get('/history/:userId/:targetId', async (req, res) => {
   try {
-    const { userId } = req.params;
+    const { userId, targetId } = req.params;
     
-    // Find all distinct receivers where user is sender
-    const sentTo = await Message.distinct('receiverId', { senderId: userId });
-    // Find all distinct senders where user is receiver
-    const receivedFrom = await Message.distinct('senderId', { receiverId: userId });
-    
-    const allChatPartnerIds = [...new Set([...sentTo, ...receivedFrom])];
-    
-    const chatPartners = await User.find({ _id: { $in: allChatPartnerIds } })
-                                   .select('username age gender vip');
+    const messages = await Message.find({
+      $or: [
+        { sender: userId, receiver: targetId },
+        { sender: targetId, receiver: userId }
+      ]
+    }).sort({ createdAt: 1 }); // Oldest to newest
 
-    res.json({ chats: chatPartners });
+    res.json({ messages });
   } catch (error) {
-    console.error('Error fetching active chats:', error);
-    res.status(500).json({ error: 'Failed to fetch active chats' });
+    console.error('Error fetching chat history:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 

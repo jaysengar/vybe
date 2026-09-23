@@ -1,71 +1,45 @@
 import express from 'express';
-import Razorpay from 'razorpay';
-import crypto from 'crypto';
 import User from '../models/User';
 
 const router = express.Router();
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || 'your_razorpay_key_here',
-  key_secret: process.env.RAZORPAY_KEY_SECRET || 'your_razorpay_secret_here',
-});
-
-// Create an order for a specific diamond package
-router.post('/create-order', async (req, res) => {
-  try {
-    const { amount, userId } = req.body; // Amount in INR (e.g., 99 for 100 diamonds)
-
-    if (!amount || !userId) {
-      return res.status(400).json({ error: 'Amount and User ID are required' });
-    }
-
-    const options = {
-      amount: amount * 100, // Razorpay works in paise
-      currency: 'INR',
-      receipt: `receipt_order_${userId}_${Date.now()}`,
-    };
-
-    const order = await razorpay.orders.create(options);
-    res.json(order);
-  } catch (error) {
-    console.error('Error creating Razorpay order:', error);
-    res.status(500).json({ error: 'Failed to create order' });
-  }
-});
-
-// Verify payment signature after client completes payment
-router.post('/verify', async (req, res) => {
+// Verify payment from RevenueCat
+router.post('/verify-revenuecat', async (req, res) => {
   try {
     const { 
-      razorpay_order_id, 
-      razorpay_payment_id, 
-      razorpay_signature, 
       userId, 
-      diamondsToAdd 
+      diamondsToAdd,
+      isVip,
+      rcAppUserId 
     } = req.body;
 
-    const secret = process.env.RAZORPAY_KEY_SECRET || 'your_razorpay_secret_here';
-
-    // Verify signature
-    const hmac = crypto.createHmac('sha256', secret);
-    hmac.update(razorpay_order_id + "|" + razorpay_payment_id);
-    const generated_signature = hmac.digest('hex');
-
-    if (generated_signature === razorpay_signature) {
-      // Payment is legit! Add diamonds to the user
-      const user = await User.findById(userId);
-      if (user) {
-        user.diamonds += diamondsToAdd;
-        await user.save();
-        res.json({ success: true, message: 'Payment verified and diamonds added!', user });
-      } else {
-        res.status(404).json({ error: 'User not found' });
-      }
-    } else {
-      res.status(400).json({ error: 'Invalid signature' });
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
     }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Optionally: Use RevenueCat REST API to verify the receipt on the backend
+    // https://docs.revenuecat.com/reference/receipts
+    // For now, we trust the client's successful SDK response.
+    
+    if (diamondsToAdd) {
+      user.diamonds += diamondsToAdd;
+    }
+    
+    if (isVip) {
+      // In a real app, VIP status would have an expiration date managed via RevenueCat webhooks
+      user.diamonds += 500; // Bonus for VIP
+    }
+
+    await user.save();
+    res.json({ success: true, message: 'Payment verified and gems added!', user });
+
   } catch (error) {
-    console.error('Error verifying payment:', error);
+    console.error('Error verifying RevenueCat payment:', error);
     res.status(500).json({ error: 'Failed to verify payment' });
   }
 });

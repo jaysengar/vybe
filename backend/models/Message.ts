@@ -1,10 +1,24 @@
-import mongoose from 'mongoose';
+import mongoose, { Schema, Document } from 'mongoose';
 
-const messageSchema = new mongoose.Schema({
-  senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  text: { type: String, required: true },
-  read: { type: Boolean, default: false },
-}, { timestamps: true });
+export interface IMessage extends Document {
+  sender: mongoose.Types.ObjectId;
+  receiver: mongoose.Types.ObjectId;
+  content: string;
+  isRead: boolean;
+  createdAt: Date;
+}
 
-export default mongoose.model('Message', messageSchema);
+const MessageSchema: Schema = new Schema({
+  sender: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  receiver: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  content: { type: String, required: true },
+  isRead: { type: Boolean, default: false }
+}, {
+  timestamps: true
+});
+
+// Index for fast query of chat history
+MessageSchema.index({ sender: 1, receiver: 1 });
+MessageSchema.index({ createdAt: -1 });
+
+export default mongoose.model<IMessage>('Message', MessageSchema);

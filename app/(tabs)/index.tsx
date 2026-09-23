@@ -9,8 +9,8 @@ import {
   Easing,
   Modal,
   Dimensions,
-  Alert,
   ImageBackground,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -35,13 +35,37 @@ import {
 import { colors, radii } from '../../src/theme/colors';
 import { TopBar } from '../../src/components/AppShell';
 import { Button } from '../../src/components/ui/Button';
+import { CustomAlert } from '../../src/components/ui/CustomAlert';
 
 // WebRTC and Socket
-import { RTCView } from 'react-native-webrtc';
+let RTCView: any = null;
+try {
+  RTCView = require('react-native-webrtc').RTCView;
+} catch (e) {
+  RTCView = () => null;
+}
 import { socketService } from '../../src/integrations/socket';
 import { useWebRTC } from '../../src/hooks/useWebRTC';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE_URL } from '../../src/config';
+
+let Location: any = null;
+try {
+  Location = require('expo-location');
+} catch (e) {
+  console.log('Location native module not found');
+  Location = {
+    requestForegroundPermissionsAsync: async () => ({ status: 'denied' }),
+    getCurrentPositionAsync: async () => ({ coords: { latitude: 0, longitude: 0 } })
+  };
+}
+
+let captureRef: any = null;
+try {
+  captureRef = require('react-native-view-shot').captureRef;
+} catch (e) {
+  console.log('ViewShot native module not found');
+}
 
 const matchBg = require('../../assets/match_bg.jpg');
 
@@ -73,6 +97,18 @@ export default function HomeScreen() {
   const [activeUsers, setActiveUsers] = useState<number>(0);
 
   const skipTimes = useRef<number[]>([]);
+  
+  const [alertState, setAlertState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+  });
+
+  const closeAlert = () => setAlertState(prev => ({ ...prev, visible: false }));
 
   // WebRTC Hooks
   const { localStream, remoteStream, currentTargetUserId, currentTargetSocket, initLocalStream, startCall, endCall, toggleMute, toggleCamera } = useWebRTC();
@@ -82,6 +118,7 @@ export default function HomeScreen() {
   const pulseAnim2 = useRef(new Animated.Value(0)).current;
   const pulseAnim3 = useRef(new Animated.Value(0)).current;
   const radarAnim = useRef(new Animated.Value(0)).current;
+  const callViewRef = useRef<View>(null);
 
   // Setup Socket Connection
   useEffect(() => {
@@ -103,7 +140,7 @@ export default function HomeScreen() {
 
     socket.on('gift_error', (data) => {
       if (data.reason === 'insufficient_diamonds') {
-        Alert.alert('Gift Error', 'You do not have enough diamonds to send this gift (Cost: 2 diamonds).');
+        setAlertState({ visible: true, title: 'Gift Error', message: 'You do not have enough diamonds to send this gift (Cost: 2 diamonds).' });
       }
     });
 
@@ -115,9 +152,9 @@ export default function HomeScreen() {
       setStage('hub');
       endCall();
       if (data.reason === 'insufficient_diamonds') {
-        Alert.alert('Not enough diamonds', 'You need at least 5 diamonds to match specifically with Women. Buy more diamonds in your profile!');
+        setAlertState({ visible: true, title: 'Not enough diamonds', message: 'You need at least 5 diamonds to match specifically with Women. Buy more diamonds in your profile!' });
       } else {
-        Alert.alert('Match Error', 'Failed to find a match.');
+        setAlertState({ visible: true, title: 'Match Error', message: 'Failed to find a match.' });
       }
     });
 
@@ -172,25 +209,78 @@ export default function HomeScreen() {
     }
   }, [stage]);
 
+  // Queue Heartbeat
+  useEffect(() => {
+    let pingInterval: NodeJS.Timeout;
+    if (stage === 'queue') {
+      pingInterval = setInterval(async () => {
+        const userStr = await AsyncStorage.getItem('user');
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          socketService.socket?.emit('queue_ping', { userId: user._id });
+        }
+      }, 5000);
+    }
+    return () => {
+      if (pingInterval) clearInterval(pingInterval);
+    };
+  }, [stage]);
+
+  const [skippedUsers, setSkippedUsers] = useState<string[]>([]);
+  const [userLoc, setUserLoc] = useState<{lat: number, lon: number} | null>(null);
+
   const enterQueue = async () => {
     const userStr = await AsyncStorage.getItem('user');
     if (!userStr) {
-      Alert.alert('Error', 'Please log in first.');
+      setAlertState({ visible: true, title: 'Error', message: 'Please log in first.' });
       return;
     }
     const user = JSON.parse(userStr);
 
+    // Request Location
+    let { status } = await Location.requestForegroundPermissionsAsync();
+    let lat, lon;
+    if (status === 'granted') {
+      try {
+        let location = await Location.getCurrentPositionAsync({});
+        lat = location.coords.latitude;
+        lon = location.coords.longitude;
+        setUserLoc({ lat, lon });
+      } catch (e) {
+        console.log('Error getting location', e);
+      }
+    }
+
+    // Request Camera & Mic
+    try {
+      await initLocalStream();
+    } catch (e) {
+      setAlertState({
+        visible: true,
+        title: 'Permissions Required',
+        message: 'Camera and Microphone access are required to match. Please enable them in Settings.',
+        primaryButtonText: 'Open Settings',
+        onPrimaryPress: () => {
+          Linking.openSettings();
+          setAlertState((prev: any) => ({ ...prev, visible: false }));
+        },
+        secondaryButtonText: 'Cancel',
+        onSecondaryPress: () => setAlertState((prev: any) => ({ ...prev, visible: false }))
+      });
+      return;
+    }
+
     setStage('queue');
     setReported(false);
     
-    // Request Camera & Mic
-    await initLocalStream();
-
     // Tell server to find a match
     socketService.socket?.emit('join_queue', {
       userId: user._id,
       gender: user.gender,
       filterGender: gender,
+      lat: lat || userLoc?.lat,
+      lon: lon || userLoc?.lon,
+      skipped: skippedUsers,
     });
   };
 
@@ -206,7 +296,7 @@ export default function HomeScreen() {
     return () => clearInterval(timer);
   }, [cooldown]);
 
-  const nextMatch = () => {
+  const nextMatch = async () => {
     if (cooldown) return;
     const now = Date.now();
     skipTimes.current = [...skipTimes.current.filter((t) => now - t < 15_000), now];
@@ -215,17 +305,52 @@ export default function HomeScreen() {
       skipTimes.current = [];
     }
     
+    const userStr = await AsyncStorage.getItem('user');
+    const user = userStr ? JSON.parse(userStr) : null;
+
     endCall();
     setMuted(false);
     setCameraOff(false);
+    setReported(false);
+    setIcebreaker(null);
     setChatOpen(false);
-    enterQueue();
+    
+    if (currentTargetUserId && user) {
+      const newSkipped = [...skippedUsers, currentTargetUserId];
+      setSkippedUsers(newSkipped);
+      
+      socketService.socket?.emit('skip_match', {
+        userId: user._id,
+        targetUserId: currentTargetUserId,
+        gender: user.gender,
+        filterGender: gender,
+        lat: userLoc?.lat,
+        lon: userLoc?.lon,
+        skipped: newSkipped,
+      });
+      setStage('queue');
+    } else {
+      enterQueue();
+    }
   };
 
   const submitReport = async () => {
     setReportOpen(false);
     setReported(true);
     
+    let screenshotUrl = '';
+    if (callViewRef.current) {
+      try {
+        screenshotUrl = await captureRef(callViewRef, {
+          format: 'jpg',
+          quality: 0.5,
+          result: 'base64'
+        });
+      } catch (e) {
+        console.error('Screenshot failed', e);
+      }
+    }
+
     // Send report to server
     try {
       const userStr = await AsyncStorage.getItem('user');
@@ -237,7 +362,8 @@ export default function HomeScreen() {
           body: JSON.stringify({
             reporterId: user._id,
             reportedUserId: currentTargetUserId.current,
-            reason: reason
+            reason: reason,
+            screenshotUrl: screenshotUrl ? `data:image/jpeg;base64,${screenshotUrl}` : undefined
           })
         });
       }
@@ -337,7 +463,7 @@ export default function HomeScreen() {
   // ===================== CALL SCREEN =====================
   if (stage === 'call') {
     return (
-      <View style={[styles.flex1, styles.bgMain]}>
+      <View ref={callViewRef} style={[styles.flex1, styles.bgMain]} collapsable={false}>
         {/* Remote Video Feed */}
         {remoteStream && !reported ? (
           <RTCView
@@ -557,17 +683,6 @@ export default function HomeScreen() {
       <View style={styles.filterPanel}>
         <TouchableOpacity
           style={styles.filterBtn}
-          onPress={() => setRegion(region === 'Global' ? 'Local' : 'Global')}
-        >
-          {region === 'Global' ? (
-            <Globe size={16} color={colors.mutedForeground} />
-          ) : (
-            <MapPin size={16} color={colors.mutedForeground} />
-          )}
-          <Text style={styles.filterText}>{region}</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.filterBtn}
           onPress={() => {
             const opts = ['Everyone', 'Women', 'Men'];
             const idx = opts.indexOf(gender);
@@ -593,7 +708,7 @@ export default function HomeScreen() {
             <Loader size={24} color={colors.primaryForeground} />
             <Text style={styles.matchBtnTitle}>Tap to match</Text>
             <Text style={styles.matchBtnSub}>
-              {region} · {gender}
+              {gender}
             </Text>
           </TouchableOpacity>
         </View>
@@ -608,6 +723,13 @@ export default function HomeScreen() {
         </Text>
       </View>
     </SafeAreaView>
+
+    <CustomAlert
+      visible={alertState.visible}
+      title={alertState.title}
+      message={alertState.message}
+      onPrimaryPress={closeAlert}
+    />
   </ImageBackground>
   );
 }

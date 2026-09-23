@@ -5,9 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   Modal,
 } from 'react-native';
+import { CustomAlert } from '../../src/components/ui/CustomAlert';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   Bell,
@@ -20,6 +20,8 @@ import {
   ShieldCheck,
   Trash2,
   X,
+  FileText,
+  Lock,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -29,7 +31,12 @@ import { Button } from '../../src/components/ui/Button';
 import { Switch } from '../../src/components/ui/Switch';
 import { API_BASE_URL } from '../../src/config';
 import { socketService } from '../../src/integrations/socket';
-import RazorpayCheckout from 'react-native-razorpay';
+let Purchases: any = null;
+try {
+  Purchases = require('react-native-purchases').default;
+} catch (e) {
+  Purchases = null;
+}
 
 function ToggleRow({
   icon: Icon,
@@ -84,6 +91,23 @@ export default function SettingsScreen() {
   const [microphone, setMicrophone] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [buyGemsOpen, setBuyGemsOpen] = useState(false);
+
+  const [alertState, setAlertState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+    secondaryButtonText?: string;
+    onSecondaryPress?: () => void;
+    isDestructive?: boolean;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+  });
+
+  const closeAlert = () => setAlertState(prev => ({ ...prev, visible: false }));
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -156,86 +180,73 @@ export default function SettingsScreen() {
 
   const handleBuyGems = async (amount: number, priceINR: number) => {
     if (!user) return;
+    if (!Purchases) {
+      setAlertState({ visible: true, title: 'Error', message: 'Purchases module not available.' });
+      return;
+    }
     try {
-      // 1. Create order on backend
-      const res = await fetch(`${API_BASE_URL}/api/payments/create-order`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: priceINR, userId: user._id })
-      });
-      const order = await res.json();
-      if (!order.id) throw new Error('Failed to create order');
-
-      // 2. Open Razorpay Checkout
-      const options = {
-        description: `Buy ${amount} Gems`,
-        image: 'https://i.imgur.com/3g7nmJC.png',
-        currency: 'INR',
-        key: 'rzp_test_YourKeyIdHere', // Replace with your real Razorpay key
-        amount: order.amount,
-        name: 'VYBE',
-        order_id: order.id,
-        prefill: {
-          email: `${user.username}@vybe.app`,
-          contact: '9999999999',
-          name: user.username
-        },
-        theme: { color: colors.primary }
-      };
-
-      RazorpayCheckout.open(options).then(async (data: any) => {
-        // 3. Verify Payment
-        const verifyRes = await fetch(`${API_BASE_URL}/api/payments/verify`, {
+      setAlertState({ visible: true, title: 'Purchasing...', message: 'Please wait' });
+      
+      // Fetch offerings from RevenueCat
+      const offerings = await Purchases.getOfferings();
+      if (offerings.current !== null && offerings.current.availablePackages.length !== 0) {
+        
+        // Find the package that matches our amount (this is a simplified example, usually you map amounts to specific RC package identifiers)
+        const packageToBuy = offerings.current.availablePackages[0]; // Replace with matching logic
+        
+        const { purchaserInfo, productIdentifier } = await Purchases.purchasePackage(packageToBuy);
+        
+        // Verify with our backend securely using the RC App User ID
+        const verifyRes = await fetch(`${API_BASE_URL}/api/payments/verify-revenuecat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            razorpay_order_id: data.razorpay_order_id,
-            razorpay_payment_id: data.razorpay_payment_id,
-            razorpay_signature: data.razorpay_signature,
             userId: user._id,
-            diamondsToAdd: amount
+            diamondsToAdd: amount,
+            rcAppUserId: await Purchases.getAppUserID()
           })
         });
+        
         const verifyData = await verifyRes.json();
         if (verifyData.success) {
-          Alert.alert('Success', `You purchased ${amount} Gems!`);
+          setAlertState({ visible: true, title: 'Success', message: `You purchased ${amount} Gems!` });
           setBuyGemsOpen(false);
-          // Balance updates automatically via socket
         } else {
-          Alert.alert('Error', 'Payment verification failed.');
+          setAlertState({ visible: true, title: 'Error', message: 'Payment verification failed.' });
         }
-      }).catch((error: any) => {
-        Alert.alert('Error', `Payment cancelled or failed: ${error.description || error.message}`);
-      });
-
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Error', 'Could not initiate payment.');
+      } else {
+        setAlertState({ visible: true, title: 'Error', message: 'No products available.' });
+      }
+    } catch (err: any) {
+      if (!err.userCancelled) {
+        setAlertState({ visible: true, title: 'Error', message: err.message || 'Could not initiate payment.' });
+      } else {
+        closeAlert();
+      }
     }
   };
 
   const handleDeleteAccount = async () => {
-    Alert.alert(
-      "Delete Account",
-      "Are you sure you want to permanently delete your account?",
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
-          style: "destructive",
-          onPress: async () => {
-             if (!user) return;
-             try {
-               await fetch(`${API_BASE_URL}/api/auth/delete/${user._id}`, { method: 'DELETE' });
-               await AsyncStorage.removeItem('user');
-               router.replace('/login');
-             } catch (err) {
-               Alert.alert('Error', 'Failed to delete account');
-             }
-          }
-        }
-      ]
-    );
+    setAlertState({
+      visible: true,
+      title: "Delete Account",
+      message: "Are you sure you want to permanently delete your account?",
+      primaryButtonText: "Delete",
+      isDestructive: true,
+      onPrimaryPress: async () => {
+         closeAlert();
+         if (!user) return;
+         try {
+           await fetch(`${API_BASE_URL}/api/auth/delete/${user._id}`, { method: 'DELETE' });
+           await AsyncStorage.removeItem('user');
+           router.replace('/login');
+         } catch (err) {
+           setAlertState({ visible: true, title: 'Error', message: 'Failed to delete account' });
+         }
+      },
+      secondaryButtonText: "Cancel",
+      onSecondaryPress: closeAlert
+    });
   };
 
   return (
@@ -292,7 +303,7 @@ export default function SettingsScreen() {
              </View>
              <Button variant="secondary" size="sm" onPress={() => {
                 // Mock ad watch
-                Alert.alert('Watching Ad...', 'You earned 1 Gem!', [{ text: 'Awesome' }]);
+                setAlertState({ visible: true, title: 'Watching Ad...', message: 'You earned 1 Gem!' });
                 socketService.socket?.emit('watch_ad', { userId: user?._id });
              }}>
                Watch Ad
@@ -316,26 +327,48 @@ export default function SettingsScreen() {
              <Text style={styles.vipTitle}>VYBE VIP</Text>
           </View>
           <Text style={styles.vipDesc}>Get a crown badge, priority matchmaking, and 500 free diamonds a month.</Text>
-          <Button variant="default" style={styles.vipBtn} onPress={async () => {
-             // Basic Razorpay Integration (same as matchmaker)
+           <Button variant="default" style={styles.vipBtn} onPress={async () => {
              if (!user) return;
              try {
-                const res = await fetch(`${API_BASE_URL}/api/payments/create-order`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ userId: user._id, amount: 999, type: 'vip' })
-                });
-                if (res.ok) {
-                   Alert.alert('Success', 'Razorpay Checkout Flow would launch here!');
-                   // Mock updating user diamonds
+               setAlertState({ visible: true, title: 'Purchasing VIP...', message: 'Please wait' });
+               const offerings = await Purchases.getOfferings();
+               if (offerings.current !== null && offerings.current.availablePackages.length !== 0) {
+                 // Simplified: grab a package for VIP (e.g. index 1 or specific identifier)
+                 const vipPackage = offerings.current.availablePackages.find(p => p.packageType === Purchases.PACKAGE_TYPE.MONTHLY) || offerings.current.availablePackages[0];
+                 const { purchaserInfo } = await Purchases.purchasePackage(vipPackage);
+                 
+                 // Verify on backend
+                 const verifyRes = await fetch(`${API_BASE_URL}/api/payments/verify-revenuecat`, {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({
+                     userId: user._id,
+                     diamondsToAdd: 500, // VIP bonus
+                     isVip: true,
+                     rcAppUserId: await Purchases.getAppUserID()
+                   })
+                 });
+                 
+                 const verifyData = await verifyRes.json();
+                 if (verifyData.success) {
+                   setAlertState({ visible: true, title: 'Welcome to VIP!', message: 'You are now a VYBE VIP.' });
                    const fresh = await fetch(`${API_BASE_URL}/api/auth/me/${user._id}`);
                    const freshData = await fresh.json();
                    setUser(freshData.user);
-                }
-             } catch (err) {
-               console.error(err);
+                 } else {
+                   setAlertState({ visible: true, title: 'Error', message: 'Verification failed.' });
+                 }
+               } else {
+                 setAlertState({ visible: true, title: 'Error', message: 'VIP Subscription not available.' });
+               }
+             } catch (err: any) {
+               if (!err.userCancelled) {
+                 setAlertState({ visible: true, title: 'Error', message: err.message || 'Could not upgrade.' });
+               } else {
+                 closeAlert();
+               }
              }
-          }}>
+           }}>
             Upgrade for ₹999/mo
           </Button>
         </View>
@@ -373,8 +406,10 @@ export default function SettingsScreen() {
         {/* Safety */}
         <Text style={styles.sectionLabel}>Safety & support</Text>
         <View style={styles.settingsGroup}>
-          <LinkRow icon={CircleHelp} label="Help center" />
-          <LinkRow icon={ShieldCheck} label="Community guidelines" />
+          <LinkRow icon={ShieldCheck} label="Community guidelines" onPress={() => router.push('/policies/guidelines' as any)} />
+          <LinkRow icon={CircleHelp} label="Safety center" onPress={() => router.push('/policies/safety' as any)} />
+          <LinkRow icon={FileText} label="Terms of Service" onPress={() => router.push('/policies/terms' as any)} />
+          <LinkRow icon={Lock} label="Privacy Policy" onPress={() => router.push('/policies/privacy' as any)} />
           <LinkRow icon={Trash2} label="Delete account" danger onPress={handleDeleteAccount} />
         </View>
 
@@ -430,6 +465,16 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
+      <CustomAlert
+        visible={alertState.visible}
+        title={alertState.title}
+        message={alertState.message}
+        primaryButtonText={alertState.primaryButtonText}
+        onPrimaryPress={alertState.onPrimaryPress || closeAlert}
+        secondaryButtonText={alertState.secondaryButtonText}
+        onSecondaryPress={alertState.onSecondaryPress}
+        isDestructive={alertState.isDestructive}
+      />
     </SafeAreaView>
   );
 }
@@ -616,8 +661,8 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: colors.background,
-    borderTopLeftRadius: radii.2xl,
-    borderTopRightRadius: radii.2xl,
+    borderTopLeftRadius: radii['2xl'],
+    borderTopRightRadius: radii['2xl'],
     minHeight: 300,
     paddingBottom: 40,
   },

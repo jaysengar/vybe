@@ -42,6 +42,22 @@ const io = new Server(server, {
   }
 });
 
+import jwt from 'jsonwebtoken';
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_123';
+
+// Socket Authentication Middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) {
+    return next(new Error('Authentication error'));
+  }
+  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
+    if (err) return next(new Error('Authentication error'));
+    (socket as any).userId = decoded.userId;
+    next();
+  });
+});
+
 // Basic route to check if server is running
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'VYBE Backend is running' });
@@ -49,12 +65,7 @@ app.get('/health', (req, res) => {
 
 import { processMatchPayment } from './services/matchmaker';
 
-interface QueueUser {
-  socketId: string;
-  userId: string;
-  gender: string;
-  filterGender: string;
-}
+import MatchQueue from './models/MatchQueue';
 
 const icebreakers = [
   "If you had to eat one meal for the rest of your life, what would it be?",
@@ -67,68 +78,119 @@ const icebreakers = [
   "Cats or Dogs?"
 ];
 
-let queue: QueueUser[] = [];
 // Map userId -> socketId to enable direct messaging even when not matched
 const userSockets = new Map<string, string>();
 
 // Socket.io connection handling
 io.on('connection', (socket) => {
-  console.log('A user connected:', socket.id);
+  const userId = (socket as any).userId;
+  console.log(`A user connected: ${socket.id} (User ID: ${userId})`);
+
+  userSockets.set(userId, socket.id);
 
   // Broadcast active users count
   io.emit('active_users_count', { count: io.engine.clientsCount * 12 + 10000 }); // some mock large active pool calculation or real count
 
+  const tryMatch = async (userIdToMatch: string) => {
+    try {
+      const userInQueue = await MatchQueue.findOne({ userId: userIdToMatch });
+      if (!userInQueue) return;
 
-  socket.on('register_user', (userId: string) => {
-    userSockets.set(userId, socket.id);
-  });
+      const user = await User.findById(userIdToMatch);
+      if (!user) return;
 
-  const tryMatch = async () => {
-    if (queue.length < 2) return;
+      // Ensure user has some coordinates, else default to 0,0
+      const coordinates = userInQueue.location?.coordinates || [0, 0];
 
-    for (let i = 0; i < queue.length; i++) {
-      for (let j = i + 1; j < queue.length; j++) {
-        const userA = queue[i];
-        const userB = queue[j];
+      // Build gender filter query
+      let genderQuery: any = {};
+      
+      // If user is looking for a specific gender, filter by that
+      if (userInQueue.filterGender !== 'Everyone') {
+        genderQuery.gender = userInQueue.filterGender;
+      }
 
-        const aAcceptsB = userA.filterGender === 'Everyone' || userA.filterGender === userB.gender;
-        const bAcceptsA = userB.filterGender === 'Everyone' || userB.filterGender === userA.gender;
+      // Find closest user that matches filters, hasn't skipped them, and they haven't skipped
+      const potentialMatches = await MatchQueue.aggregate([
+        {
+          $geoNear: {
+            near: { type: "Point", coordinates },
+            distanceField: "distance",
+            spherical: true,
+            maxDistance: 20000000 // 20,000km (basically earth radius to match anyone if needed)
+          }
+        },
+        {
+          $match: {
+            userId: { $ne: new mongoose.Types.ObjectId(userIdToMatch) },
+            ...genderQuery,
+            skipped: { $ne: new mongoose.Types.ObjectId(userIdToMatch) }, // They haven't skipped me
+            _id: { $nin: userInQueue.skipped } // I haven't skipped them
+          }
+        },
+        { $limit: 1 }
+      ]);
 
-        if (aAcceptsB && bAcceptsA) {
-          queue.splice(j, 1);
-          queue.splice(i, 1);
+      if (potentialMatches.length > 0) {
+        const match = potentialMatches[0];
+        
+        // Double check mutual acceptance: if the other person is NOT looking for 'Everyone', they must be looking for my gender
+        if (match.filterGender !== 'Everyone' && match.filterGender !== userInQueue.gender) {
+            return; // Mutual acceptance failed, we leave them in queue
+        }
 
-          const aPaid = await processMatchPayment(userA.userId, userA.filterGender);
-          const bPaid = await processMatchPayment(userB.userId, userB.filterGender);
+        // We found a match! Remove both from queue atomically
+        const resA = await MatchQueue.findOneAndDelete({ userId: userInQueue.userId });
+        const resB = await MatchQueue.findOneAndDelete({ userId: match.userId });
+
+        if (resA && resB) {
+          const aPaid = await processMatchPayment(userInQueue.userId.toString(), userInQueue.filterGender);
+          const bPaid = await processMatchPayment(match.userId.toString(), match.filterGender);
 
           if (aPaid && bPaid) {
             const randomIcebreaker = icebreakers[Math.floor(Math.random() * icebreakers.length)];
 
-            // Deduct happened, emit balance update
-            const aUser = await User.findById(userA.userId);
-            const bUser = await User.findById(userB.userId);
-            if (aUser) io.to(userA.socketId).emit('balance_update', { diamonds: aUser.diamonds });
-            if (bUser) io.to(userB.socketId).emit('balance_update', { diamonds: bUser.diamonds });
+            const aUser = await User.findById(userInQueue.userId);
+            const bUser = await User.findById(match.userId);
+            
+            if (aUser && bUser) {
+              aUser.pastMatches.push({ user: bUser._id as any, matchedAt: new Date() });
+              bUser.pastMatches.push({ user: aUser._id as any, matchedAt: new Date() });
+              await aUser.save();
+              await bUser.save();
+              
+              io.to(userInQueue.socketId).emit('balance_update', { diamonds: aUser.diamonds });
+              io.to(match.socketId).emit('balance_update', { diamonds: bUser.diamonds });
+            }
 
-            io.to(userA.socketId).emit('match_found', { 
-              targetSocketId: userB.socketId, 
-              targetUserId: userB.userId,
+            io.to(userInQueue.socketId).emit('match_found', { 
+              targetSocketId: match.socketId, 
+              targetUserId: match.userId.toString(),
               isInitiator: true,
               icebreaker: randomIcebreaker
             });
-            io.to(userB.socketId).emit('match_found', { 
-              targetSocketId: userA.socketId, 
-              targetUserId: userA.userId,
+            io.to(match.socketId).emit('match_found', { 
+              targetSocketId: userInQueue.socketId, 
+              targetUserId: userInQueue.userId.toString(),
               isInitiator: false,
               icebreaker: randomIcebreaker
             });
           } else {
-            if (!aPaid) io.to(userA.socketId).emit('match_error', { reason: 'insufficient_diamonds' });
-            if (!bPaid) io.to(userB.socketId).emit('match_error', { reason: 'insufficient_diamonds' });
+            if (!aPaid) io.to(userInQueue.socketId).emit('match_error', { reason: 'insufficient_diamonds' });
+            if (!bPaid) io.to(match.socketId).emit('match_error', { reason: 'insufficient_diamonds' });
+            
+            // Put the innocent party back in the queue
+            if (aPaid) {
+                await MatchQueue.create({ ...match }); // Need proper re-insertion logic, simplified here
+            }
+            if (bPaid) {
+                await MatchQueue.create({ ...userInQueue });
+            }
           }
-          return;
         }
       }
+    } catch (err) {
+      console.error('tryMatch Error:', err);
     }
   };
 
@@ -143,21 +205,72 @@ io.on('connection', (socket) => {
         return;
       }
 
-      queue = queue.filter(u => u.socketId !== socket.id); // Prevent duplicates
-      queue.push({
-        socketId: socket.id,
-        userId: data.userId,
-        gender: data.gender,
-        filterGender: data.filterGender
-      });
-      tryMatch();
+      const coordinates = (data.lat && data.lon) ? [data.lon, data.lat] : [0, 0];
+
+      // Update location in DB if provided
+      if (user) {
+        user.location = { type: 'Point', coordinates };
+        await user.save();
+      }
+
+      // Upsert user into MatchQueue
+      await MatchQueue.findOneAndUpdate(
+        { userId: data.userId },
+        {
+          socketId: socket.id,
+          gender: data.gender,
+          filterGender: data.filterGender,
+          location: { type: 'Point', coordinates },
+          skipped: data.skipped || [],
+          lastPingAt: new Date()
+        },
+        { upsert: true, new: true }
+      );
+
+      tryMatch(data.userId);
     } catch (err) {
       console.error('Error joining queue:', err);
     }
   });
+
+  socket.on('queue_ping', async (data) => {
+    try {
+       await MatchQueue.findOneAndUpdate({ userId: data.userId }, { lastPingAt: new Date() });
+    } catch (err) {
+       console.error('Queue ping error', err);
+    }
+  });
   
-  socket.on('leave_queue', () => {
-    queue = queue.filter(u => u.socketId !== socket.id);
+  socket.on('skip_match', async (data) => {
+    const { userId, targetUserId, gender, filterGender, lat, lon, skipped } = data;
+    const newSkipped = [...(skipped || []), targetUserId];
+    const coordinates = (lat && lon) ? [lon, lat] : [0, 0];
+    
+    try {
+      await MatchQueue.findOneAndUpdate(
+        { userId },
+        {
+          socketId: socket.id,
+          gender,
+          filterGender,
+          location: { type: 'Point', coordinates },
+          skipped: newSkipped,
+          lastPingAt: new Date()
+        },
+        { upsert: true }
+      );
+      tryMatch(userId);
+    } catch (err) {
+       console.error('Error in skip_match:', err);
+    }
+  });
+
+  socket.on('leave_queue', async () => {
+    try {
+      await MatchQueue.findOneAndDelete({ socketId: socket.id });
+    } catch (err) {
+      console.error(err);
+    }
   });
 
   // WebRTC Signaling
@@ -221,15 +334,15 @@ io.on('connection', (socket) => {
       socket.emit('balance_update', { diamonds: sender.diamonds });
 
       // Save to database
-      const newMessage = new Message({ senderId, receiverId, text });
+      const newMessage = new Message({ sender: senderId, receiver: receiverId, content: text });
       await newMessage.save();
 
       // See if receiver is online to deliver real-time
       if (userSockets.has(receiverId)) {
         const receiverSocketId = userSockets.get(receiverId);
         io.to(receiverSocketId).emit('receive_message', {
-          senderId,
-          text,
+          sender: senderId,
+          content: text,
           createdAt: newMessage.createdAt
         });
       }

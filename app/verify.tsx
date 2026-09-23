@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radii } from '../src/theme/colors';
 import { Button } from '../src/components/ui/Button';
+import { CustomAlert } from '../src/components/ui/CustomAlert';
 import { API_BASE_URL } from '../src/config';
 import { ShieldCheck, Camera as CameraIcon } from 'lucide-react-native';
 
@@ -16,6 +17,20 @@ export default function VerifyScreen() {
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [photoBase64, setPhotoBase64] = useState<string | null>(null);
   const cameraRef = useRef<CameraView>(null);
+  
+  const [alertState, setAlertState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+    primaryButtonText?: string;
+    onPrimaryPress?: () => void;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+  });
+
+  const closeAlert = () => setAlertState(prev => ({ ...prev, visible: false }));
 
   useEffect(() => {
     if (!permission?.granted) {
@@ -32,7 +47,7 @@ export default function VerifyScreen() {
           setPhotoBase64(photo.base64 || null);
         }
       } catch (err) {
-        Alert.alert('Error', 'Failed to take photo');
+        setAlertState({ visible: true, title: 'Error', message: 'Failed to take photo' });
       }
     }
   };
@@ -57,16 +72,23 @@ export default function VerifyScreen() {
         // Update local storage
         user.verificationStatus = 'verified';
         await AsyncStorage.setItem('user', JSON.stringify(user));
-        Alert.alert('Verified!', 'Your identity has been confirmed.', [
-          { text: 'Start Matching', onPress: () => router.replace('/(tabs)') }
-        ]);
+        setAlertState({
+          visible: true,
+          title: 'Verified!',
+          message: 'Your identity has been confirmed.',
+          primaryButtonText: 'Start Matching',
+          onPrimaryPress: () => {
+            closeAlert();
+            router.replace('/(tabs)');
+          },
+        });
       } else {
-        Alert.alert('Verification Failed', data.error || 'Please try again.');
+        setAlertState({ visible: true, title: 'Verification Failed', message: data.error || 'Please try again.' });
         setPhotoUri(null);
         setPhotoBase64(null);
       }
     } catch (err) {
-      Alert.alert('Error', 'Could not connect to verification server.');
+      setAlertState({ visible: true, title: 'Error', message: 'Could not connect to verification server.' });
     } finally {
       setLoading(false);
     }
@@ -123,7 +145,16 @@ export default function VerifyScreen() {
             Take Selfie
           </Button>
         )}
+        )}
       </View>
+
+      <CustomAlert
+        visible={alertState.visible}
+        title={alertState.title}
+        message={alertState.message}
+        primaryButtonText={alertState.primaryButtonText}
+        onPrimaryPress={alertState.onPrimaryPress || closeAlert}
+      />
     </SafeAreaView>
   );
 }
@@ -155,7 +186,7 @@ const styles = StyleSheet.create({
   cameraContainer: {
     width: '100%',
     aspectRatio: 3 / 4,
-    borderRadius: radii.2xl,
+    borderRadius: radii['2xl'],
     overflow: 'hidden',
     backgroundColor: colors.card,
     marginBottom: 40,

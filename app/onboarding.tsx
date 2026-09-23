@@ -5,6 +5,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radii } from '../src/theme/colors';
 import { Button } from '../src/components/ui/Button';
+import { CustomAlert } from '../src/components/ui/CustomAlert';
 import { API_BASE_URL } from '../src/config';
 
 export default function OnboardingScreen() {
@@ -13,10 +14,11 @@ export default function OnboardingScreen() {
   const [age, setAge] = useState('');
   const [gender, setGender] = useState<'Male' | 'Female' | null>(null);
   const [loading, setLoading] = useState(false);
+  const [alertState, setAlertState] = useState({ visible: false, title: '', message: '' });
 
   const handleComplete = async () => {
     if (!age || !gender) {
-      Alert.alert('Error', 'Please fill in all fields.');
+      setAlertState({ visible: true, title: 'Error', message: 'Please fill in all fields.' });
       return;
     }
 
@@ -43,11 +45,11 @@ export default function OnboardingScreen() {
           router.replace('/(tabs)');
         }
       } else {
-        Alert.alert('Error', data.error || 'Failed to save details');
+        setAlertState({ visible: true, title: 'Error', message: data.error || 'Failed to save details' });
       }
     } catch (error) {
       console.error(error);
-      Alert.alert('Error', 'Could not connect to the server.');
+      setAlertState({ visible: true, title: 'Error', message: 'Could not connect to the server.' });
     } finally {
       setLoading(false);
     }
@@ -99,6 +101,12 @@ export default function OnboardingScreen() {
           {loading ? 'Saving...' : 'Complete Setup'}
         </Button>
       </View>
+      <CustomAlert
+        visible={alertState.visible}
+        title={alertState.title}
+        message={alertState.message}
+        onPrimaryPress={() => setAlertState({ ...alertState, visible: false })}
+      />
     </SafeAreaView>
   );
 }

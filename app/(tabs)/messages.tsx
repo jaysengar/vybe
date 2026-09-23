@@ -26,6 +26,7 @@ import { useRouter } from 'expo-router';
 import { colors, radii } from '../../src/theme/colors';
 import { TopBar } from '../../src/components/AppShell';
 import { Button } from '../../src/components/ui/Button';
+import { CustomAlert } from '../../src/components/ui/CustomAlert';
 import { socketService } from '../../src/integrations/socket';
 import { API_BASE_URL } from '../../src/config';
 
@@ -41,6 +42,18 @@ export default function MessagesScreen() {
   const [people, setPeople] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
+  const [alertState, setAlertState] = useState<{
+    visible: boolean;
+    title: string;
+    message: string;
+  }>({
+    visible: false,
+    title: '',
+    message: '',
+  });
+
+  const closeAlert = () => setAlertState(prev => ({ ...prev, visible: false }));
+
   useEffect(() => {
     const loadUserAndChats = async () => {
       try {
@@ -50,12 +63,11 @@ export default function MessagesScreen() {
           setCurrentUser(u);
           
           socketService.connect();
-          socketService.socket?.emit('register_user', u._id);
 
-          const res = await fetch(`${API_BASE_URL}/api/messages/active-chats/${u._id}`);
+          const res = await fetch(`${API_BASE_URL}/api/messages/matches/${u._id}`);
           if (res.ok) {
             const data = await res.json();
-            setPeople(data.chats);
+            setPeople(data.matches || []);
           }
         }
       } catch (err) {
@@ -79,17 +91,39 @@ export default function MessagesScreen() {
 
     const handleMessageError = (data: any) => {
       if (data.reason === 'insufficient_diamonds') {
-        Alert.alert('Out of Gems', 'You need at least 1 gem to send a message.', [{ text: 'OK' }]);
+        setAlertState({ visible: true, title: 'Out of Gems', message: 'You need at least 1 gem to send a message.' });
         // Rollback optimistic message update
         setMessages((prev) => prev.slice(0, -1));
       }
     };
 
+    const handleReconnect = async () => {
+      const pendingKey = `pending_msgs_${currentUser._id}`;
+      const pendingStr = await AsyncStorage.getItem(pendingKey);
+      if (pendingStr) {
+        const pending = JSON.parse(pendingStr);
+        for (const msg of pending) {
+          socketService.socket?.emit('private_message', {
+            senderId: currentUser._id,
+            receiverId: msg.receiverId,
+            text: msg.text
+          });
+        }
+        await AsyncStorage.removeItem(pendingKey);
+      }
+    };
+
     socketService.socket.on('receive_message', handleReceiveMessage);
     socketService.socket.on('message_error', handleMessageError);
+    socketService.socket.on('connect', handleReconnect);
+    
+    // Also try flushing right now in case it's already connected
+    if (socketService.socket.connected) handleReconnect();
+
     return () => {
       socketService.socket?.off('receive_message', handleReceiveMessage);
       socketService.socket?.off('message_error', handleMessageError);
+      socketService.socket?.off('connect', handleReconnect);
     };
   }, [activeChatId, currentUser]);
 
@@ -108,18 +142,32 @@ export default function MessagesScreen() {
     }
   };
 
-  const send = () => {
+  const send = async () => {
     if (!draft.trim() || !activeChatId || !currentUser) return;
     const msgText = draft.trim();
     
     // Optimistic UI update
-    setMessages((prev) => [...prev, { senderId: currentUser._id, text: msgText, createdAt: new Date() }]);
+    const newMsg = { sender: currentUser._id, content: msgText, createdAt: new Date() };
+    setMessages((prev) => [...prev, newMsg]);
     
-    socketService.socket?.emit('private_message', {
-      senderId: currentUser._id,
-      receiverId: activeChatId,
-      text: msgText
-    });
+    if (socketService.socket?.connected) {
+      socketService.socket.emit('private_message', {
+        senderId: currentUser._id,
+        receiverId: activeChatId,
+        text: msgText
+      });
+    } else {
+      // Cache pending message
+      const pendingKey = `pending_msgs_${currentUser._id}`;
+      const pendingStr = await AsyncStorage.getItem(pendingKey);
+      const pending = pendingStr ? JSON.parse(pendingStr) : [];
+      pending.push({
+        receiverId: activeChatId,
+        text: msgText,
+        createdAt: newMsg.createdAt
+      });
+      await AsyncStorage.setItem(pendingKey, JSON.stringify(pending));
+    }
     
     setDraft('');
   };
@@ -151,7 +199,7 @@ export default function MessagesScreen() {
             keyExtractor={(item, i) => item._id || `${item.createdAt}-${i}`}
             contentContainerStyle={styles.messagesList}
             renderItem={({ item }) => {
-              const isSentByMe = item.senderId === currentUser?._id;
+              const isSentByMe = item.sender === currentUser?._id;
               return (
                 <View
                   style={[
@@ -159,7 +207,7 @@ export default function MessagesScreen() {
                     isSentByMe ? styles.bubbleSent : styles.bubbleReceived,
                   ]}
                 >
-                  <Text style={styles.messageText}>{item.text}</Text>
+                  <Text style={styles.messageText}>{item.content}</Text>
                 </View>
               );
             }}
@@ -193,6 +241,13 @@ export default function MessagesScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+
+        <CustomAlert
+          visible={alertState.visible}
+          title={alertState.title}
+          message={alertState.message}
+          onPrimaryPress={closeAlert}
+        />
       </SafeAreaView>
     );
   }
@@ -240,18 +295,18 @@ export default function MessagesScreen() {
         ) : (
           people.map((person, index) => (
             <TouchableOpacity
-              key={person._id}
+              key={person.user?._id || index}
               style={styles.conversation}
-              onPress={() => loadHistory(person._id, person.username)}
+              onPress={() => loadHistory(person.user?._id, person.user?.username)}
               activeOpacity={0.7}
             >
               <View style={styles.convoAvatar}>
                 <Image source={index % 2 === 0 ? chatAvatar1 : chatAvatar2} style={styles.convoAvatarImg} />
               </View>
               <View style={styles.convoContent}>
-                <Text style={styles.convoName}>{person.username}</Text>
+                <Text style={styles.convoName}>{person.user?.username}</Text>
                 <Text style={styles.convoMsg} numberOfLines={1}>
-                  Tap to view conversation
+                  {person.distance ? `${person.distance} · Tap to chat` : 'Tap to chat'}
                 </Text>
               </View>
               <View style={styles.convoMeta}>
@@ -261,6 +316,13 @@ export default function MessagesScreen() {
           ))
         )}
       </View>
+
+      <CustomAlert
+        visible={alertState.visible}
+        title={alertState.title}
+        message={alertState.message}
+        onPrimaryPress={closeAlert}
+      />
     </SafeAreaView>
   );
 }
