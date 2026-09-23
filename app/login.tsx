@@ -13,9 +13,8 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // You MUST replace this webClientId with your actual one from Google Cloud Console
     GoogleSignin.configure({
-      webClientId: 'YOUR_WEB_CLIENT_ID_HERE.apps.googleusercontent.com',
+      webClientId: '454947608863-gb79t1qcqelledkf6unbn5j5bbd7flbc.apps.googleusercontent.com',
     });
   }, []);
 
