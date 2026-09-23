@@ -10,6 +10,7 @@ import {
   Modal,
   Dimensions,
   Alert,
+  ImageBackground,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -40,6 +41,9 @@ import { RTCView } from 'react-native-webrtc';
 import { socketService } from '../../src/integrations/socket';
 import { useWebRTC } from '../../src/hooks/useWebRTC';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_BASE_URL } from '../../src/config';
+
+const matchBg = require('../../assets/match_bg.jpg');
 
 type Stage = 'hub' | 'queue' | 'call';
 type ReportReason = 'nudity' | 'harassment' | 'underage' | 'spam' | 'other';
@@ -66,6 +70,7 @@ export default function HomeScreen() {
   
   const [icebreaker, setIcebreaker] = useState<string | null>(null);
   const [giftReceived, setGiftReceived] = useState<string | null>(null);
+  const [activeUsers, setActiveUsers] = useState<number>(0);
 
   const skipTimes = useRef<number[]>([]);
 
@@ -102,6 +107,10 @@ export default function HomeScreen() {
       }
     });
 
+    socket.on('active_users_count', (data) => {
+      setActiveUsers(data.count);
+    });
+
     socket.on('match_error', (data) => {
       setStage('hub');
       endCall();
@@ -123,6 +132,7 @@ export default function HomeScreen() {
       socket.off('peer_left');
       socket.off('receive_gift');
       socket.off('gift_error');
+      socket.off('active_users_count');
     };
   }, []);
 
@@ -221,7 +231,7 @@ export default function HomeScreen() {
       const userStr = await AsyncStorage.getItem('user');
       if (userStr && currentTargetUserId.current) {
         const user = JSON.parse(userStr);
-        await fetch('http://localhost:3000/api/moderation/report', {
+        await fetch(`${API_BASE_URL}/api/moderation/report`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -280,8 +290,9 @@ export default function HomeScreen() {
     });
 
     return (
-      <SafeAreaView style={[styles.flex1, styles.bgMain]}>
-        <View style={styles.queueScreen}>
+      <ImageBackground source={matchBg} style={[styles.flex1, styles.bgMain]} blurRadius={5}>
+        <SafeAreaView style={styles.flex1}>
+          <View style={[styles.queueScreen, { backgroundColor: 'rgba(0,0,0,0.4)' }]}>
           <View style={styles.queueTop}>
             <Text style={styles.queueBrand}>VYBE</Text>
             <View style={styles.onlinePill}>
@@ -318,7 +329,8 @@ export default function HomeScreen() {
             <Text style={styles.cancelText}>Cancel search</Text>
           </Button>
         </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </ImageBackground>
     );
   }
 
@@ -587,7 +599,7 @@ export default function HomeScreen() {
 
         <View style={[styles.onlinePill, { marginTop: 22 }]}>
           <View style={styles.statusDot} />
-          <Text style={styles.onlineText}>12,842 people online now</Text>
+          <Text style={styles.onlineText}>{activeUsers > 0 ? activeUsers.toLocaleString() : '...'} people online now</Text>
         </View>
 
         <Text style={styles.kindnessNote}>

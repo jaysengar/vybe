@@ -26,6 +26,7 @@ import { TopBar } from '../../src/components/AppShell';
 import { Button } from '../../src/components/ui/Button';
 import { Switch } from '../../src/components/ui/Switch';
 import { API_BASE_URL } from '../../src/config';
+import { socketService } from '../../src/integrations/socket';
 
 function ToggleRow({
   icon: Icon,
@@ -90,6 +91,14 @@ export default function SettingsScreen() {
           if (res.ok) {
             const data = await res.json();
             setUser(data.user);
+            
+            // Set preferences from db
+            if (data.user.preferences) {
+              setNotifications(data.user.preferences.pushNotifications);
+              setCamera(data.user.preferences.cameraAccess);
+              setMicrophone(data.user.preferences.micAccess);
+            }
+
             await AsyncStorage.setItem('user', JSON.stringify(data.user)); // sync
           }
         }
@@ -98,7 +107,48 @@ export default function SettingsScreen() {
       }
     };
     fetchUser();
+
+    // Listen to real-time balance updates
+    const handleBalanceUpdate = (data: { diamonds: number }) => {
+      setUser((prev: any) => prev ? { ...prev, diamonds: data.diamonds } : prev);
+      AsyncStorage.getItem('user').then(stored => {
+        if (stored) {
+          const u = JSON.parse(stored);
+          u.diamonds = data.diamonds;
+          AsyncStorage.setItem('user', JSON.stringify(u));
+        }
+      });
+    };
+
+    if (socketService.socket) {
+      socketService.socket.on('balance_update', handleBalanceUpdate);
+    }
+    
+    return () => {
+      if (socketService.socket) {
+        socketService.socket.off('balance_update', handleBalanceUpdate);
+      }
+    };
   }, []);
+
+  const updatePreference = async (key: string, value: boolean) => {
+    if (!user) return;
+    try {
+      const newPrefs = {
+        pushNotifications: key === 'pushNotifications' ? value : notifications,
+        cameraAccess: key === 'cameraAccess' ? value : camera,
+        micAccess: key === 'micAccess' ? value : microphone,
+      };
+
+      await fetch(`${API_BASE_URL}/api/auth/profile/${user._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: newPrefs })
+      });
+    } catch (err) {
+      console.error('Failed to update preference:', err);
+    }
+  };
 
   const handleDeleteAccount = async () => {
     Alert.alert(
@@ -146,7 +196,7 @@ export default function SettingsScreen() {
             <View style={styles.profileTop}>
               <View>
                 <Text style={styles.profileName}>{user?.username || 'Loading...'}</Text>
-                <Text style={styles.profileLevel}>Level 8 · Good Vibes</Text>
+                <Text style={styles.profileLevel}>Level {user?.level || 1} · Good Vibes</Text>
               </View>
               <Button variant="ghost" size="sm" onPress={async () => {
                 await AsyncStorage.removeItem('user');
@@ -156,16 +206,46 @@ export default function SettingsScreen() {
               </Button>
             </View>
             <View style={styles.levelBar}>
-              <View style={styles.levelFill} />
+              <View style={[styles.levelFill, { width: `${Math.min(100, ((user?.xp || 0) / 1000) * 100)}%` }]} />
             </View>
             <View style={styles.xpRow}>
-              <Text style={styles.xpText}>720 / 1,000 XP</Text>
+              <Text style={styles.xpText}>{user?.xp || 0} / 1,000 XP</Text>
               <View style={styles.gemRow}>
                 <Gem size={12} color={colors.primary} fill={colors.primary} />
                 <Text style={styles.gemText}>{user?.diamonds || 0}</Text>
               </View>
             </View>
           </View>
+        </View>
+
+        {/* Wallet & Gems Card */}
+        <Text style={styles.sectionLabel}>Wallet & Gems</Text>
+        <View style={styles.settingsGroup}>
+           <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+             <View>
+               <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>Watch Ad for Gems</Text>
+               <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>Watch a short video to earn 1 Gem.</Text>
+             </View>
+             <Button variant="secondary" size="sm" onPress={() => {
+                // Mock ad watch
+                Alert.alert('Watching Ad...', 'You earned 1 Gem!', [{ text: 'Awesome' }]);
+                socketService.socket?.emit('watch_ad', { userId: user?._id });
+             }}>
+               Watch Ad
+             </Button>
+           </View>
+           <View style={{ padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+             <View>
+               <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>Buy 50 Gems</Text>
+               <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>Mock purchase flow.</Text>
+             </View>
+             <Button variant="default" size="sm" onPress={() => {
+                socketService.socket?.emit('buy_gems', { userId: user?._id });
+                Alert.alert('Purchase Successful', 'Added 50 Gems to your wallet!');
+             }}>
+               Buy
+             </Button>
+           </View>
         </View>
 
         {/* VIP Subscription Card */}
@@ -206,19 +286,19 @@ export default function SettingsScreen() {
             icon={Bell}
             label="Push notifications"
             checked={notifications}
-            onChange={setNotifications}
+            onChange={(v) => { setNotifications(v); updatePreference('pushNotifications', v); }}
           />
           <ToggleRow
             icon={Camera}
             label="Camera access"
             checked={camera}
-            onChange={setCamera}
+            onChange={(v) => { setCamera(v); updatePreference('cameraAccess', v); }}
           />
           <ToggleRow
             icon={Mic}
             label="Microphone access"
             checked={microphone}
-            onChange={setMicrophone}
+            onChange={(v) => { setMicrophone(v); updatePreference('micAccess', v); }}
           />
           <LinkRow icon={Globe} label="Language · English" />
         </View>
@@ -226,7 +306,7 @@ export default function SettingsScreen() {
         {/* Match History */}
         <Text style={styles.sectionLabel}>Match History</Text>
         <View style={styles.settingsGroup}>
-          <LinkRow icon={Gem} label="View past matches" />
+          <LinkRow icon={Gem} label="View past matches" onPress={() => router.push('/messages' as any)} />
         </View>
 
         {/* Safety */}

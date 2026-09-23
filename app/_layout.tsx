@@ -20,14 +20,20 @@ export default function RootLayout() {
   useEffect(() => {
     if (isAuthenticated === null) return;
 
-    const inAuthGroup = segments[0] === 'login';
+    const verifyRoute = async () => {
+      const user = await AsyncStorage.getItem('user');
+      const isAuth = !!user;
+      const inAuthGroup = segments[0] === 'login';
 
-    if (!isAuthenticated && !inAuthGroup) {
-      router.replace('/login');
-    } else if (isAuthenticated && inAuthGroup) {
-      router.replace('/(tabs)');
-    }
-  }, [isAuthenticated, segments]);
+      if (!isAuth && !inAuthGroup) {
+        router.replace('/login');
+      } else if (isAuth && inAuthGroup) {
+        router.replace('/(tabs)');
+      }
+    };
+
+    verifyRoute();
+  }, [segments, isAuthenticated]);
 
   if (isAuthenticated === null) return null; // loading state
 

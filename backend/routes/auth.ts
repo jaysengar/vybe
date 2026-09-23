@@ -57,4 +57,20 @@ router.delete('/delete/:id', async (req, res) => {
   }
 });
 
+// Update profile preferences
+router.put('/profile/:id', async (req, res) => {
+  try {
+    const { preferences } = req.body;
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { $set: { preferences } },
+      { new: true }
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ message: 'Profile updated', user });
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

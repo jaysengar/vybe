@@ -10,6 +10,7 @@ import moderationRoutes from './routes/moderation';
 import messagesRoutes from './routes/messages';
 import User from './models/User';
 import Message from './models/Message';
+import Transaction from './models/Transaction';
 
 dotenv.config();
 
@@ -74,6 +75,10 @@ const userSockets = new Map<string, string>();
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
+  // Broadcast active users count
+  io.emit('active_users_count', { count: io.engine.clientsCount * 12 + 10000 }); // some mock large active pool calculation or real count
+
+
   socket.on('register_user', (userId: string) => {
     userSockets.set(userId, socket.id);
   });
@@ -98,6 +103,12 @@ io.on('connection', (socket) => {
 
           if (aPaid && bPaid) {
             const randomIcebreaker = icebreakers[Math.floor(Math.random() * icebreakers.length)];
+
+            // Deduct happened, emit balance update
+            const aUser = await User.findById(userA.userId);
+            const bUser = await User.findById(userB.userId);
+            if (aUser) io.to(userA.socketId).emit('balance_update', { diamonds: aUser.diamonds });
+            if (bUser) io.to(userB.socketId).emit('balance_update', { diamonds: bUser.diamonds });
 
             io.to(userA.socketId).emit('match_found', { 
               targetSocketId: userB.socketId, 
@@ -166,6 +177,10 @@ io.on('connection', (socket) => {
          sender.diamonds -= cost;
          await sender.save();
          
+         await new Transaction({ userId: sender._id, type: 'spend', amount: cost, reason: 'sent_gift' }).save();
+
+         socket.emit('balance_update', { diamonds: sender.diamonds });
+         
          // Forward gift to the receiver
          io.to(data.targetSocketId).emit('receive_gift', { giftType: data.giftType });
        } else {
@@ -179,14 +194,25 @@ io.on('connection', (socket) => {
   socket.on('private_message', async (data) => {
     try {
       const { senderId, receiverId, text } = data;
+
+      const sender = await User.findById(senderId);
+      if (!sender) return;
+
+      if (sender.diamonds < 1) {
+        socket.emit('message_error', { reason: 'insufficient_diamonds' });
+        return;
+      }
+
+      sender.diamonds -= 1;
+      await sender.save();
+      await new Transaction({ userId: sender._id, type: 'spend', amount: 1, reason: 'sent_message' }).save();
+      socket.emit('balance_update', { diamonds: sender.diamonds });
+
       // Save to database
       const newMessage = new Message({ senderId, receiverId, text });
       await newMessage.save();
 
       // See if receiver is online to deliver real-time
-      // We need a mapping from userId to socketId for this to work robustly.
-      // For now, if they are still in the call, targetSocketId might be known,
-      // but typically we'd look up receiverId in a userSockets map.
       if (userSockets.has(receiverId)) {
         const receiverSocketId = userSockets.get(receiverId);
         io.to(receiverSocketId).emit('receive_message', {
@@ -200,8 +226,37 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('watch_ad', async (data) => {
+    try {
+      const user = await User.findById(data.userId);
+      if (user) {
+        user.diamonds += 1;
+        await user.save();
+        await new Transaction({ userId: user._id, type: 'earn', amount: 1, reason: 'watch_ad' }).save();
+        socket.emit('balance_update', { diamonds: user.diamonds });
+      }
+    } catch (err) {
+      console.error('Error in watch_ad:', err);
+    }
+  });
+
+  socket.on('buy_gems', async (data) => {
+    try {
+      const user = await User.findById(data.userId);
+      if (user) {
+        user.diamonds += 50; // Add 50 gems for the mock purchase
+        await user.save();
+        await new Transaction({ userId: user._id, type: 'purchase', amount: 50, reason: 'buy_gems_mock' }).save();
+        socket.emit('balance_update', { diamonds: user.diamonds });
+      }
+    } catch (err) {
+      console.error('Error in buy_gems:', err);
+    }
+  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
+    io.emit('active_users_count', { count: io.engine.clientsCount * 12 + 10000 });
     queue = queue.filter(u => u.socketId !== socket.id);
     // Remove from userSockets map if we stored them
     for (const [userId, sId] of userSockets.entries()) {

@@ -14,7 +14,7 @@ export const processMatchPayment = async (userId: string, genderFilter: string):
     if (!user) return false;
 
     // It is free to match with Men or Everyone.
-    if (genderFilter !== 'Female') {
+    if (genderFilter !== 'Women') {
       return true;
     }
 

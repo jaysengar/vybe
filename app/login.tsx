@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, radii } from '../src/theme/colors';
 import { Button } from '../src/components/ui/Button';
+import { API_BASE_URL } from '../src/config';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -23,7 +24,7 @@ export default function LoginScreen() {
     try {
       // In development, point to your local backend IP
       // For now we'll use localhost (or 10.0.2.2 for Android emulator)
-      const API_URL = 'http://localhost:3000/api/auth/login'; 
+      const API_URL = `${API_BASE_URL}/api/auth/login`; 
       
       const response = await fetch(API_URL, {
         method: 'POST',

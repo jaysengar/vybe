@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 // Use your computer's local IP address if testing on a physical device, 
 // or localhost/10.0.2.2 if testing on iOS Simulator/Android Emulator.
 // We'll use localhost for now.
-const SOCKET_URL = 'http://localhost:3000';
+const SOCKET_URL = 'https://vybe-backend-1uz9.onrender.com';
 
 class SocketService {
   public socket: Socket | null = null;

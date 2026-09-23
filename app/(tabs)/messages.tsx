@@ -9,6 +9,7 @@ import {
   Image,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -21,15 +22,18 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { colors, radii } from '../../src/theme/colors';
 import { TopBar } from '../../src/components/AppShell';
 import { Button } from '../../src/components/ui/Button';
 import { socketService } from '../../src/integrations/socket';
 import { API_BASE_URL } from '../../src/config';
 
-const chatPortraits = require('../../assets/chat-portraits.jpg');
+const chatAvatar1 = require('../../assets/profile_girl_1.jpg');
+const chatAvatar2 = require('../../assets/profile_girl_2.jpg');
 
 export default function MessagesScreen() {
+  const router = useRouter();
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [activeChatName, setActiveChatName] = useState<string>('');
   const [messages, setMessages] = useState<any[]>([]);
@@ -73,9 +77,19 @@ export default function MessagesScreen() {
       }
     };
 
+    const handleMessageError = (data: any) => {
+      if (data.reason === 'insufficient_diamonds') {
+        Alert.alert('Out of Gems', 'You need at least 1 gem to send a message.', [{ text: 'OK' }]);
+        // Rollback optimistic message update
+        setMessages((prev) => prev.slice(0, -1));
+      }
+    };
+
     socketService.socket.on('receive_message', handleReceiveMessage);
+    socketService.socket.on('message_error', handleMessageError);
     return () => {
       socketService.socket?.off('receive_message', handleReceiveMessage);
+      socketService.socket?.off('message_error', handleMessageError);
     };
   }, [activeChatId, currentUser]);
 
@@ -212,7 +226,7 @@ export default function MessagesScreen() {
             </View>
           </View>
           <Button
-            onPress={() => setActive('New match')}
+            onPress={() => router.push('/')}
             style={styles.findChatBtn}
           >
             Find a chat
@@ -224,7 +238,7 @@ export default function MessagesScreen() {
         {people.length === 0 ? (
           <Text style={{ color: colors.mutedForeground, marginTop: 12 }}>No active chats yet. Start matching!</Text>
         ) : (
-          people.map((person) => (
+          people.map((person, index) => (
             <TouchableOpacity
               key={person._id}
               style={styles.conversation}
@@ -232,7 +246,7 @@ export default function MessagesScreen() {
               activeOpacity={0.7}
             >
               <View style={styles.convoAvatar}>
-                <Image source={chatPortraits} style={styles.convoAvatarImg} />
+                <Image source={index % 2 === 0 ? chatAvatar1 : chatAvatar2} style={styles.convoAvatarImg} />
               </View>
               <View style={styles.convoContent}>
                 <Text style={styles.convoName}>{person.username}</Text>

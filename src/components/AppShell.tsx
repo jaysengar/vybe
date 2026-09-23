@@ -4,6 +4,8 @@ import { Gem } from 'lucide-react-native';
 import { colors, radii } from '../theme/colors';
 import { useRouter } from 'expo-router';
 import { TouchableOpacity } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { socketService } from '../integrations/socket';
 
 export function BrandMark() {
   return (
@@ -19,19 +21,57 @@ export function BrandMark() {
 
 export function TopBar() {
   const router = useRouter();
+  const [diamonds, setDiamonds] = React.useState<number>(0);
+  const [initial, setInitial] = React.useState<string>('U');
+
+  React.useEffect(() => {
+    const loadUser = async () => {
+      const stored = await AsyncStorage.getItem('user');
+      if (stored) {
+        const user = JSON.parse(stored);
+        setDiamonds(user.diamonds || 0);
+        setInitial(user.username ? user.username.charAt(0).toUpperCase() : 'U');
+      }
+    };
+    loadUser();
+
+    // Listen to real-time balance updates
+    const handleBalanceUpdate = (data: { diamonds: number }) => {
+      setDiamonds(data.diamonds);
+      // Update local storage so it persists on reload
+      AsyncStorage.getItem('user').then(stored => {
+        if (stored) {
+          const user = JSON.parse(stored);
+          user.diamonds = data.diamonds;
+          AsyncStorage.setItem('user', JSON.stringify(user));
+        }
+      });
+    };
+
+    if (socketService.socket) {
+      socketService.socket.on('balance_update', handleBalanceUpdate);
+    }
+    
+    return () => {
+      if (socketService.socket) {
+        socketService.socket.off('balance_update', handleBalanceUpdate);
+      }
+    };
+  }, []);
+
   return (
     <View style={styles.topBar}>
       <BrandMark />
       <View style={styles.topBarRight}>
         <View style={styles.coinPill}>
           <Gem size={14} color={colors.primary} fill={colors.primary} />
-          <Text style={styles.coinText}>1,240</Text>
+          <Text style={styles.coinText}>{diamonds.toLocaleString()}</Text>
         </View>
         <TouchableOpacity
           style={styles.avatarMini}
           onPress={() => router.push('/settings' as any)}
         >
-          <Text style={styles.avatarText}>JT</Text>
+          <Text style={styles.avatarText}>{initial}</Text>
         </TouchableOpacity>
       </View>
     </View>
