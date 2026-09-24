@@ -17,6 +17,7 @@ export default function LoginScreen() {
   useEffect(() => {
     GoogleSignin.configure({
       webClientId: '454947608863-gb79t1qcqelledkf6unbn5j5bbd7flbc.apps.googleusercontent.com',
+      scopes: ['https://www.googleapis.com/auth/user.gender.read'],
     });
   }, []);
 
@@ -37,6 +38,7 @@ export default function LoginScreen() {
     try {
       await GoogleSignin.hasPlayServices();
       const userInfo = await GoogleSignin.signIn();
+      const tokens = await GoogleSignin.getTokens();
       const deviceId = await getDeviceId();
 
       if (!userInfo.data?.user.id || !userInfo.data?.user.email) {
@@ -50,7 +52,8 @@ export default function LoginScreen() {
           googleId: userInfo.data.user.id,
           email: userInfo.data.user.email,
           name: userInfo.data.user.name,
-          deviceId
+          deviceId,
+          accessToken: tokens.accessToken
         }),
       });
 

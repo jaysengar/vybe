@@ -11,10 +11,27 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_123';
 // Google Login Endpoint
 router.post('/google-login', async (req, res) => {
   try {
-    const { googleId, email, name, deviceId } = req.body;
+    const { googleId, email, name, deviceId, accessToken } = req.body;
 
     if (!googleId || !email) {
       return res.status(400).json({ error: 'Google ID and Email are required' });
+    }
+
+    let fetchedGender: 'Male' | 'Female' | null = null;
+    if (accessToken) {
+      try {
+        const peopleRes = await fetch('https://people.googleapis.com/v1/people/me?personFields=genders', {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        const peopleData = await peopleRes.json();
+        if (peopleData.genders && peopleData.genders.length > 0) {
+          const g = peopleData.genders[0].value;
+          if (g === 'male') fetchedGender = 'Male';
+          else if (g === 'female') fetchedGender = 'Female';
+        }
+      } catch (err) {
+        console.error('Failed to fetch gender from Google:', err);
+      }
     }
 
     let user = await User.findOne({ username: email }); // Using email as unique username for now
@@ -29,7 +46,6 @@ router.post('/google-login', async (req, res) => {
       return res.json({ message: 'Login successful', user, token, isNewUser: false });
     } else {
       // New User
-      // Check if this deviceId has already claimed gems
       let startingDiamonds = 10;
       if (deviceId) {
         const existingDevice = await User.findOne({ deviceId });
@@ -38,18 +54,29 @@ router.post('/google-login', async (req, res) => {
         }
       }
 
-      // Create partial user with temporary gender/age (to be properly filled in onboarding)
+      let isFullyOnboarded = false;
+      let verificationStatus = 'unverified';
+      
+      if (fetchedGender === 'Male') {
+        verificationStatus = 'verified';
+        isFullyOnboarded = true;
+      } else if (fetchedGender === 'Female') {
+        verificationStatus = 'unverified';
+        isFullyOnboarded = true;
+      }
+
       user = new User({ 
         username: email, 
         deviceId,
         diamonds: startingDiamonds,
-        age: 18, // Mongoose requires this, will be updated in onboarding
-        gender: 'Male', // Mongoose requires this, will be updated in onboarding
+        age: 18, // Default age, since we skip onboarding
+        gender: fetchedGender || 'Male', // Fallback for Mongoose
+        verificationStatus
       });
       await user.save();
       
       const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '30d' });
-      return res.json({ message: 'User created. Onboarding required.', user, token, isNewUser: true });
+      return res.json({ message: 'User created.', user, token, isNewUser: !isFullyOnboarded });
     }
   } catch (error) {
     console.error('Google Auth Error:', error);

@@ -145,7 +145,6 @@ export default function VerifyScreen() {
             Take Selfie
           </Button>
         )}
-        )}
       </View>
 
       <CustomAlert
