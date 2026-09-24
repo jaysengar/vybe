@@ -1,5 +1,5 @@
-﻿import { Tabs } from 'expo-router';
-import { Home, MessageCircle, Settings } from 'lucide-react-native';
+import { Tabs } from 'expo-router';
+import { Smile, MessageCircle, User } from 'lucide-react-native';
 import { View, StyleSheet } from 'react-native';
 import { colors } from '../../src/theme/colors';
 
@@ -8,20 +8,16 @@ export default function TabLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarShowLabel: false,
         tabBarStyle: {
           backgroundColor: colors.background,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: 82,
+          height: 60,
           paddingTop: 10,
-          paddingBottom: 20,
         },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.mutedForeground,
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-        },
       }}
     >
       <Tabs.Screen
@@ -29,7 +25,7 @@ export default function TabLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <Home size={size} color={color} strokeWidth={2} />
+            <Smile size={28} color={color} strokeWidth={2.5} />
           ),
         }}
       />
@@ -39,7 +35,7 @@ export default function TabLayout() {
           title: 'Messages',
           tabBarIcon: ({ color, size }) => (
             <View>
-              <MessageCircle size={size} color={color} strokeWidth={2} />
+              <MessageCircle size={28} color={color} strokeWidth={2.5} />
               <View style={tabStyles.badge} />
             </View>
           ),
@@ -48,9 +44,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Settings',
+          title: 'Profile',
           tabBarIcon: ({ color, size }) => (
-            <Settings size={size} color={color} strokeWidth={2} />
+            <User size={28} color={color} strokeWidth={2.5} />
           ),
         }}
       />

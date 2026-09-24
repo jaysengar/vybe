@@ -22,6 +22,11 @@ import {
   X,
   FileText,
   Lock,
+  Crown,
+  Star,
+  Coins,
+  ShoppingBag,
+  ClipboardList,
 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
@@ -257,150 +262,94 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.sectionTag}>YOUR SPACE</Text>
-        <Text style={styles.pageTitle}>Profile & settings</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.pageTitle}>Me</Text>
+        </View>
 
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.profileAvatar}>
             <Text style={styles.profileAvatarText}>
-              {user?.username ? user.username.substring(0, 2).toUpperCase() : '??'}
+              {user?.username ? user.username.substring(0, 1).toUpperCase() : 'J'}
             </Text>
           </View>
-          <View style={styles.flex1}>
-            <View style={styles.profileTop}>
-              <View>
-                <Text style={styles.profileName}>{user?.username || 'Loading...'}</Text>
-                <Text style={styles.profileLevel}>Level {user?.level || 1} · Good Vibes</Text>
+          <View style={styles.profileInfo}>
+            <Text style={styles.profileName}>{user?.username || 'Jay Sengar'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
+              <Text style={styles.profileUid}>UID: {user?._id ? user._id.substring(0, 9) : '324021003'}</Text>
+              <View style={styles.genderIcon}>
+                <Text style={{ fontSize: 10, color: '#fff' }}>{user?.gender === 'Female' ? '♀' : '♂'}</Text>
               </View>
-              <Button variant="ghost" size="sm" onPress={async () => {
-                await AsyncStorage.removeItem('user');
-                router.replace('/login');
-              }}>
-                Logout
-              </Button>
-            </View>
-            <View style={styles.levelBar}>
-              <View style={[styles.levelFill, { width: `${Math.min(100, ((user?.xp || 0) / 1000) * 100)}%` }]} />
-            </View>
-            <View style={styles.xpRow}>
-              <Text style={styles.xpText}>{user?.xp || 0} / 1,000 XP</Text>
-              <View style={styles.gemRow}>
-                <Gem size={12} color={colors.primary} fill={colors.primary} />
-                <Text style={styles.gemText}>{user?.diamonds || 0}</Text>
+              <View style={styles.crownBadge}>
+                <Crown size={10} color="#999" />
               </View>
             </View>
           </View>
         </View>
 
-        {/* Wallet & Gems Card */}
-        <Text style={styles.sectionLabel}>Wallet & Gems</Text>
-        <View style={styles.settingsGroup}>
-           <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-             <View>
-               <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>Watch Ad for Gems</Text>
-               <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>Watch a short video to earn 1 Gem.</Text>
-             </View>
-             <Button variant="secondary" size="sm" onPress={() => {
-                // Mock ad watch
-                setAlertState({ visible: true, title: 'Watching Ad...', message: 'You earned 1 Gem!' });
-                socketService.socket?.emit('watch_ad', { userId: user?._id });
-             }}>
-               Watch Ad
-             </Button>
-           </View>
-           <View style={{ padding: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-             <View>
-               <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: '600', marginBottom: 4 }}>Buy Gems</Text>
-               <Text style={{ color: colors.mutedForeground, fontSize: 13 }}>Get more gems to match & chat.</Text>
-             </View>
-             <Button variant="default" size="sm" onPress={() => setBuyGemsOpen(true)}>
-               Buy Gems
-             </Button>
-           </View>
-        </View>
-
-        {/* VIP Subscription Card */}
-        <View style={styles.vipCard}>
-          <View style={styles.vipTop}>
-             <Gem size={20} color="#F59E0B" fill="#F59E0B" />
-             <Text style={styles.vipTitle}>VYBE VIP</Text>
+        {/* VIP Subscription Card (Pill) */}
+        <TouchableOpacity 
+          style={styles.vipPill} 
+          activeOpacity={0.8}
+          onPress={() => {
+             router.push('/pricing');
+          }}
+        >
+          <View style={styles.vipPillLeft}>
+            <View style={styles.vipCrownIcon}>
+              <Crown size={20} color="#F59E0B" fill="#F59E0B" />
+            </View>
+            <View>
+              <Text style={styles.vipTitle}>VYBE VIP</Text>
+              <Text style={styles.vipDesc}>Get More Gender Filters</Text>
+            </View>
           </View>
-          <Text style={styles.vipDesc}>Get a crown badge, priority matchmaking, and 500 free diamonds a month.</Text>
-           <Button variant="default" style={styles.vipBtn} onPress={async () => {
-             if (!user) return;
-             try {
-               setAlertState({ visible: true, title: 'Purchasing VIP...', message: 'Please wait' });
-               const offerings = await Purchases.getOfferings();
-               if (offerings.current !== null && offerings.current.availablePackages.length !== 0) {
-                 // Simplified: grab a package for VIP (e.g. index 1 or specific identifier)
-                 const vipPackage = offerings.current.availablePackages.find(p => p.packageType === Purchases.PACKAGE_TYPE.MONTHLY) || offerings.current.availablePackages[0];
-                 const { purchaserInfo } = await Purchases.purchasePackage(vipPackage);
-                 
-                 // Verify on backend
-                 const verifyRes = await fetch(`${API_BASE_URL}/api/payments/verify-revenuecat`, {
-                   method: 'POST',
-                   headers: { 'Content-Type': 'application/json' },
-                   body: JSON.stringify({
-                     userId: user._id,
-                     diamondsToAdd: 500, // VIP bonus
-                     isVip: true,
-                     rcAppUserId: await Purchases.getAppUserID()
-                   })
-                 });
-                 
-                 const verifyData = await verifyRes.json();
-                 if (verifyData.success) {
-                   setAlertState({ visible: true, title: 'Welcome to VIP!', message: 'You are now a VYBE VIP.' });
-                   const fresh = await fetch(`${API_BASE_URL}/api/auth/me/${user._id}`);
-                   const freshData = await fresh.json();
-                   setUser(freshData.user);
-                 } else {
-                   setAlertState({ visible: true, title: 'Error', message: 'Verification failed.' });
-                 }
-               } else {
-                 setAlertState({ visible: true, title: 'Error', message: 'VIP Subscription not available.' });
-               }
-             } catch (err: any) {
-               if (!err.userCancelled) {
-                 setAlertState({ visible: true, title: 'Error', message: err.message || 'Could not upgrade.' });
-               } else {
-                 closeAlert();
-               }
-             }
-           }}>
-            Upgrade for ₹999/mo
-          </Button>
+          <ChevronRight size={20} color={colors.primary} />
+        </TouchableOpacity>
+
+        {/* 2x2 Grid */}
+        <View style={styles.gridContainer}>
+          <TouchableOpacity style={styles.gridItem} activeOpacity={0.7} onPress={() => {
+              setAlertState({ visible: true, title: 'Watching Ad...', message: 'You earned 1 Gem!' });
+              socketService.socket?.emit('watch_ad', { userId: user?._id });
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Star size={24} color="#F59E0B" fill="#F59E0B" />
+              <Text style={styles.gridItemText}>Free Coins</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.gridItem} activeOpacity={0.7} onPress={() => setBuyGemsOpen(true)}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={styles.coinIcon}>
+                <Text style={{ color: '#F59E0B', fontWeight: '800', fontSize: 14 }}>C</Text>
+              </View>
+              <Text style={styles.gridItemText}>{user?.diamonds || 0}</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.gridItem} activeOpacity={0.7}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <ShoppingBag size={24} color="#FF4B4B" fill="transparent" />
+              <Text style={styles.gridItemText}>Backpack</Text>
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.gridItem} activeOpacity={0.7} onPress={() => router.push('/messages' as any)}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <ClipboardList size={24} color="#F97316" />
+              <Text style={styles.gridItemText}>History</Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
         {/* Preferences */}
-        <Text style={styles.sectionLabel}>Preferences</Text>
+        <Text style={[styles.sectionLabel, { marginTop: 20 }]}>Preferences</Text>
         <View style={styles.settingsGroup}>
-          <ToggleRow
-            icon={Bell}
-            label="Push notifications"
-            checked={notifications}
-            onChange={(v) => { setNotifications(v); updatePreference('pushNotifications', v); }}
-          />
-          <ToggleRow
-            icon={Camera}
-            label="Camera access"
-            checked={camera}
-            onChange={(v) => { setCamera(v); updatePreference('cameraAccess', v); }}
-          />
-          <ToggleRow
-            icon={Mic}
-            label="Microphone access"
-            checked={microphone}
-            onChange={(v) => { setMicrophone(v); updatePreference('micAccess', v); }}
-          />
+          <ToggleRow icon={Bell} label="Push notifications" checked={notifications} onChange={(v) => { setNotifications(v); updatePreference('pushNotifications', v); }} />
+          <ToggleRow icon={Camera} label="Camera access" checked={camera} onChange={(v) => { setCamera(v); updatePreference('cameraAccess', v); }} />
+          <ToggleRow icon={Mic} label="Microphone access" checked={microphone} onChange={(v) => { setMicrophone(v); updatePreference('micAccess', v); }} />
           <LinkRow icon={Globe} label="Language · English" />
-        </View>
-
-        {/* Match History */}
-        <Text style={styles.sectionLabel}>Match History</Text>
-        <View style={styles.settingsGroup}>
-          <LinkRow icon={Gem} label="View past matches" onPress={() => router.push('/messages' as any)} />
         </View>
 
         {/* Safety */}
@@ -411,6 +360,10 @@ export default function SettingsScreen() {
           <LinkRow icon={FileText} label="Terms of Service" onPress={() => router.push('/policies/terms' as any)} />
           <LinkRow icon={Lock} label="Privacy Policy" onPress={() => router.push('/policies/privacy' as any)} />
           <LinkRow icon={Trash2} label="Delete account" danger onPress={handleDeleteAccount} />
+          <LinkRow icon={Trash2} label="Logout" danger onPress={async () => {
+             await AsyncStorage.removeItem('user');
+             router.replace('/login');
+          }} />
         </View>
 
         <Text style={styles.footer}>VYBE 1.0 · Safety comes first</Text>
@@ -488,121 +441,123 @@ const styles = StyleSheet.create({
     paddingBottom: 112,
   },
 
-  sectionTag: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.primary,
-    letterSpacing: 0.5,
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    marginTop: 10,
   },
   pageTitle: {
-    marginTop: 4,
-    marginBottom: 28,
-    fontSize: 32,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '800',
     color: colors.foreground,
   },
-
-  // ---- Profile Card ----
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    backgroundColor: colors.card,
     marginBottom: 24,
   },
   profileAvatar: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#65A30D', // Green avatar
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.primary,
+    marginRight: 16,
   },
   profileAvatarText: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.foreground,
+    color: '#ffffff',
+    fontSize: 36,
+    fontWeight: '600',
   },
-  profileTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  profileInfo: {
+    flex: 1,
   },
   profileName: {
+    fontSize: 22,
     fontWeight: '700',
     color: colors.foreground,
-    fontSize: 15,
   },
-  profileLevel: {
+  profileUid: {
     fontSize: 12,
     color: colors.mutedForeground,
   },
-  levelBar: {
-    marginTop: 12,
-    width: '100%',
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: colors.secondary,
-    overflow: 'hidden',
-  },
-  levelFill: {
-    width: '72%',
-    height: '100%',
+  genderIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  xpRow: {
-    marginTop: 8,
+  crownBadge: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vipPill: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  xpText: {
-    fontSize: 11,
-    color: colors.mutedForeground,
-  },
-  gemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  gemText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-
-  // ---- VIP Card ----
-  vipCard: {
-    padding: 16,
-    borderRadius: radii.lg,
-    backgroundColor: 'rgba(245,158,11,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(245,158,11,0.3)',
+    backgroundColor: colors.accent,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 100, // pill shape
     marginBottom: 24,
   },
-  vipTop: {
+  vipPillLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    gap: 12,
+  },
+  vipCrownIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,132,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   vipTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
-    color: '#F59E0B',
+    color: colors.primary,
   },
   vipDesc: {
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.foreground,
-    lineHeight: 20,
-    marginBottom: 16,
+    marginTop: 2,
   },
-  vipBtn: {
-    backgroundColor: '#F59E0B',
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 24,
+  },
+  gridItem: {
+    width: '48%',
+    backgroundColor: colors.card,
+    padding: 16,
+    borderRadius: radii.xl,
+    justifyContent: 'center',
+  },
+  gridItemText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.foreground,
+  },
+  coinIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(245,158,11,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // ---- Section ----

@@ -1,28 +1,28 @@
-﻿/**
+/**
  * VYBE Design Tokens - dark-only palette
  * Converted from web app CSS custom properties (oklch -> hex).
  */
 export const colors = {
-  background: '#1a1625',
-  foreground: '#ffffff',
-  card: '#2a2438',
-  cardForeground: '#ffffff',
-  primary: '#7c3aed',
+  background: '#ffffff',
+  foreground: '#1A1A1A',
+  card: '#F4F4F4',
+  cardForeground: '#1A1A1A',
+  primary: '#0084FF', // vivid blue from reference
   primaryForeground: '#ffffff',
-  secondary: '#352e47',
-  secondaryForeground: '#ffffff',
-  muted: '#302844',
-  mutedForeground: '#9b8fb8',
-  accent: '#3e3458',
-  accentForeground: '#ffffff',
-  destructive: '#ef4444',
+  secondary: '#E8E8E8',
+  secondaryForeground: '#1A1A1A',
+  muted: '#F0F0F0',
+  mutedForeground: '#757575',
+  accent: '#E0F0FF',
+  accentForeground: '#0084FF',
+  destructive: '#FF4B4B',
   destructiveForeground: '#ffffff',
-  success: '#22c55e',
-  overlay: 'rgba(26,22,37,0.68)',
-  surfaceHigh: '#3a3250',
-  border: 'rgba(255,255,255,0.10)',
-  input: 'rgba(255,255,255,0.14)',
-  ring: '#8b5cf6',
+  success: '#34C759',
+  overlay: 'rgba(0,0,0,0.5)',
+  surfaceHigh: '#ffffff',
+  border: '#E0E0E0',
+  input: '#F5F5F5',
+  ring: '#0084FF',
 } as const;
 
 export const spacing = {

@@ -98,6 +98,7 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="login" options={{ presentation: 'fullScreenModal' }} />
+        <Stack.Screen name="pricing" options={{ presentation: 'fullScreenModal' }} />
         <Stack.Screen name="(tabs)" />
       </Stack>
     </>
